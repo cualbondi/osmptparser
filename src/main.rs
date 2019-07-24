@@ -23,6 +23,7 @@ struct RelationData {
     name: String,
     fixed_way: Vec<NodeData>,
     ways: HashMap<u64, WayData>,
+    stops: HashMap<u64, NodeData>,
 }
 
 struct Data {
@@ -32,9 +33,10 @@ struct Data {
 }
 
 // worker which processes one part of the data
-fn blobs_worker(req_rx: Receiver<Blob>, res_tx: SyncSender<Data>) {
+fn relations_parser_worker(req_rx: Receiver<Blob>, res_tx: SyncSender<Data>) {
     let routetypes_stops = ["train", "subway", "monorail", "tram", "light_rail"];
     let routetypes_all   = ["train", "subway", "monorail", "tram", "light_rail", "bus", "trolleybus"];
+    let wayroles         = ["", "forward", "backward", "alternate"];
 
     let mut collecteddata = Data {
         pt: HashMap::new(),
@@ -52,16 +54,40 @@ fn blobs_worker(req_rx: Receiver<Blob>, res_tx: SyncSender<Data>) {
         for primitive in primitive_block.primitives() {
             match primitive {
                 Primitive::Relation(relation) => {
-                    // relation.members()
                     let routetag = relation.tags().find(|&kv| kv.0 == "route");
                     let nametag = relation.tags().find(|&kv| kv.0 == "name");
                     if routetag != None && routetypes_all.contains(&routetag.unwrap().1) && nametag != None {
                         // condicion para saber si esta relation es un public transport
-                        collecteddata.pt.insert(relation.id, RelationData {
+                        let mut rd = RelationData {
                             name: nametag.unwrap().1.to_string(),
                             ways: HashMap::new(),
+                            stops: HashMap::new(),
                             fixed_way: Vec::new(),
-                        });
+                        };
+                        for member in relation.members() {
+                            // member = (role: &str, id: u64, type: RelationMemberType)
+                            // print!("'{:?}' - '{:?}'\n", wayroles, member.0);
+                            if member.2 == RelationMemberType::Way { // && wayroles.contains(&member.0) { // TODO: bug in the library maybe? see https://github.com/astro/rust-osm-pbf-iter/issues/2
+                                collecteddata.ways
+                                    .entry(member.1)
+                                    .or_insert_with(Vec::new)
+                                    .push(relation.id);
+                                rd.ways.insert(member.1, WayData {
+                                    nodes: HashMap::new(),
+                                });
+                            }
+                            if member.2 == RelationMemberType::Node {
+                                collecteddata.stops
+                                    .entry(member.1)
+                                    .or_insert_with(Vec::new)
+                                    .push(relation.id);
+                                rd.stops.insert(member.1, NodeData {
+                                    lat: 0.0,
+                                    lon: 0.0,
+                                });
+                            }
+                        }
+                        collecteddata.pt.insert(relation.id, rd);
                     }
                 },
                 _ => {}
@@ -82,7 +108,7 @@ fn main() {
             let (res_tx, res_rx) = sync_channel(0);
             workers.push((req_tx, res_rx));
             thread::spawn(move || {
-                blobs_worker(req_rx, res_tx);
+                relations_parser_worker(req_rx, res_tx);
             });
         }
 
@@ -107,15 +133,24 @@ fn main() {
             drop(req_tx);
             let worker_collecteddata = res_rx.recv().unwrap();
             collecteddata.pt.extend(worker_collecteddata.pt);
-            // TODO: these two are wrong, we need to merge the Vecs for the same key
-            // collecteddata.ways.extend(worker_collecteddata.ways);
-            // collecteddata.stops.extend(worker_collecteddata.stops);
+            for (way_id, relation_ids) in worker_collecteddata.ways.iter() {
+                collecteddata.ways.entry(*way_id)
+                    .or_insert_with(Vec::new)
+                    .extend(relation_ids)
+            }
+            for (way_id, relation_ids) in worker_collecteddata.stops.iter() {
+                collecteddata.stops.entry(*way_id)
+                    .or_insert_with(Vec::new)
+                    .extend(relation_ids)
+            }
         }
 
         let mut count = 0;
         for (key, value) in collecteddata.pt.iter() {
             count += 1;
-            print!("{:?}: {:?}\n", key, value.name);
+            let ways = value.ways.iter().count();
+            let stops = value.stops.iter().count();
+            print!("{:?}: ways {:?}, stops {:?}, {:?}\n", key, ways, stops, value.name);
         }
         print!("\nFound {:?} relations\n", count);
 
