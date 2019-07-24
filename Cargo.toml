@@ -1,0 +1,11 @@
+[package]
+name = "osmptparser"
+version = "0.0.1"
+authors = ["Julian Perelli <jperelli@gmail.com>"]
+edition = "2018"
+license = "AGPL-3.0-or-later"
+readme = "README.md"
+
+[dependencies]
+osm_pbf_iter = { git = "https://github.com/astro/rust-osm-pbf-iter" }
+num_cpus = "^1.10"
