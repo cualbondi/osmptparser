@@ -1,13 +1,10 @@
 extern crate osm_pbf_iter;
 extern crate num_cpus;
 
-use std::process;
-
 use std::collections::HashMap;
 use std::env::args;
 use std::fs::File;
-use std::io::{Seek, SeekFrom, BufReader};
-use std::time::Instant;
+use std::io::{BufReader};
 use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
 use std::thread;
 
@@ -59,10 +56,8 @@ fn main() {
             });
         }
 
-        println!("Open {}", arg);
         let f = File::open(&arg).unwrap();
         let mut reader = BlobReader::new(BufReader::new(f));
-        let start = Instant::now();
 
         let mut w = 0;
         for blob in &mut reader {
@@ -86,7 +81,7 @@ fn main() {
 
         let mut avglat = 0.0;
         let mut count = 0;
-        for (key, value) in collecteddata.nodeslat.iter() {
+        for (_key, value) in collecteddata.nodeslat.iter() {
             count += 1;
             avglat += value;
         }
@@ -94,124 +89,11 @@ fn main() {
 
         let mut avglon = 0.0;
         let mut count = 0;
-        for (key, value) in collecteddata.nodeslon.iter() {
+        for (_key, value) in collecteddata.nodeslon.iter() {
             count += 1;
             avglon += value;
         }
         print!("avg lon: {:?}", avglon / count as f64);
 
-
-
-        let stop = Instant::now();
-        let duration = stop.duration_since(start);
-        let duration = duration.as_secs() as f64 + (duration.subsec_nanos() as f64 / 1e9);
-        let mut f = reader.to_inner();
-        match f.seek(SeekFrom::Current(0)) {
-            Ok(pos) => {
-                let rate = pos as f64 / 1024f64 / 1024f64 / duration;
-                println!("Processed {} MB in {:.2} seconds ({:.2} MB/s)",
-                         pos / 1024 / 1024, duration, rate);
-            },
-            Err(_) => (),
-        }
-
-        // println!("{} - {} nodes, {} ways, {} relations", arg, stats[0], stats[1], stats[2]);
     }
 }
-
-
-// extern crate pbf_reader;
-// use pbf_reader::*;
-
-// use std::collections::HashMap;
-// use std::thread;
-// use std::sync::mpsc;
-
-// #[derive(Debug)]
-// struct MapData {
-//     nodes: HashMap<IDType, NodeF>,
-//     ways: HashMap<IDType, Way>,
-//     strings: HashMap<IDType, Strings>,
-// }
-
-// fn main() {
-
-//     let mut map_data = MapData {
-//         nodes: HashMap::with_capacity(900),
-//         ways: HashMap::with_capacity(90),
-//         strings: HashMap::with_capacity(5),
-//     };
-
-//     let (mut node_tx, node_rx) = mpsc::channel::<PBFData>();
-
-//     let h = thread::spawn(move || {
-//         return read_pbf(&("./ecuador-latest.osm.pbf".to_string()), 8, &mut node_tx);
-//     });
-
-//     let mut count = 0;
-//     let mut info = Vec::<PbfInfo>::new();
-
-//     loop {
-//         match node_rx.recv().unwrap() {
-//             PBFData::NodesSet(set) => {
-//                 for (id, node) in set {
-//                     count = count + 1;
-
-//                     // if max.lat < node.coord.lat || count == 1 {
-//                     //     max.lat = node.coord.lat
-//                     // }
-//                     // if max.lon < node.coord.lon || count == 1 {
-//                     //     max.lon = node.coord.lon
-//                     // }
-//                     // if min.lat > node.coord.lat || count == 1 {
-//                     //     min.lat = node.coord.lat
-//                     // }
-//                     // if min.lon > node.coord.lon || count == 1 {
-//                     //     min.lon = node.coord.lon
-//                     // }
-//                     // println!("node {:?}", node);
-//                     match map_data.nodes.insert(id, node) {
-//                         Some(onode) => {
-//                             // println!("W node id {} exists!!!! {:?} ", id, onode);
-//                         }
-//                         None => {}
-//                     }
-//                 }
-//             }
-//             PBFData::WaysSet(set) => {
-//                 for (id, way) in set {
-//                     // println!("got way {:?}", way );
-//                     match map_data.ways.insert(id, way) {
-//                         Some(oway) => {
-//                             // println!("W node id {} exists!!!! {:?} ", id, oway);
-//                         }
-//                         None => {}
-//                     }
-//                 }
-//             }
-//             PBFData::RelationsSet(_) => {}
-//             PBFData::Strings(id, strings) => match map_data.strings.insert(id, strings) {
-//                 Some(ostrings) => {
-//                     println!("Error: strings id {} exists!!!! {:?} ", id, ostrings);
-//                 }
-//                 None => {
-//                     // println!("got strings {}", id);
-//                 }
-//             },
-//             PBFData::PbfInfo(inf) => {
-//                 // println!("BBox '{:?}'", inf);
-//                 info.push(inf);
-//             }
-
-//             PBFData::ParseEnd => {
-//                 break;
-//             }
-//         }
-//     }
-
-//     let r = h.join().unwrap();
-//     println!("DONE!!!! {:?}", r);
-//     println!("count {:?}", count);
-
-
-// }
