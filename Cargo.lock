@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "osmptparser"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "num_cpus 1.10.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "osm_pbf_iter 0.1.0 (git+https://github.com/astro/rust-osm-pbf-iter)",
