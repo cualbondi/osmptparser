@@ -10,15 +10,36 @@ use std::thread;
 
 use osm_pbf_iter::*;
 
-struct Data {
-    nodeslat: HashMap<u64, f64>,
-    nodeslon: HashMap<u64, f64>,
+struct NodeData {
+    lat: f64,
+    lon: f64,
 }
 
+struct WayData {
+    nodes: HashMap<u64, NodeData>,
+}
+
+struct RelationData {
+    name: String,
+    fixed_way: Vec<NodeData>,
+    ways: HashMap<u64, WayData>,
+}
+
+struct Data {
+    pt: HashMap<u64, RelationData>, // { relation_id: { name: name, fixed_way: Vec<LatLon>, ways: { way_id: { name: name, nodes: { node_id: { lat: lat, lng: lng } } } } } }
+    ways: HashMap<u64, Vec<u64>>, // aux structure { way_id: [ relation_id ] }
+    stops: HashMap<u64, Vec<u64>>, // aux structure { node_id: [ relation_id ] }
+}
+
+// worker which processes one part of the data
 fn blobs_worker(req_rx: Receiver<Blob>, res_tx: SyncSender<Data>) {
+    let routetypes_stops = ["train", "subway", "monorail", "tram", "light_rail"];
+    let routetypes_all   = ["train", "subway", "monorail", "tram", "light_rail", "bus", "trolleybus"];
+
     let mut collecteddata = Data {
-        nodeslat: HashMap::new(),
-        nodeslon: HashMap::new(),
+        pt: HashMap::new(),
+        ways: HashMap::new(),
+        stops: HashMap::new(),
     };
     loop {
         let blob = match req_rx.recv() {
@@ -30,9 +51,18 @@ fn blobs_worker(req_rx: Receiver<Blob>, res_tx: SyncSender<Data>) {
         let primitive_block = PrimitiveBlock::parse(&data);
         for primitive in primitive_block.primitives() {
             match primitive {
-                Primitive::Node(node) => {
-                    collecteddata.nodeslat.insert(node.id, node.lat);
-                    collecteddata.nodeslon.insert(node.id, node.lon);
+                Primitive::Relation(relation) => {
+                    // relation.members()
+                    let routetag = relation.tags().find(|&kv| kv.0 == "route");
+                    let nametag = relation.tags().find(|&kv| kv.0 == "name");
+                    if routetag != None && routetypes_all.contains(&routetag.unwrap().1) && nametag != None {
+                        // condicion para saber si esta relation es un public transport
+                        collecteddata.pt.insert(relation.id, RelationData {
+                            name: nametag.unwrap().1.to_string(),
+                            ways: HashMap::new(),
+                            fixed_way: Vec::new(),
+                        });
+                    }
                 },
                 _ => {}
             }
@@ -67,33 +97,27 @@ fn main() {
             req_tx.send(blob).unwrap();
         }
 
-
+        // reduce / join all data from workers into one structure
         let mut collecteddata = Data {
-            nodeslat: HashMap::new(),
-            nodeslon: HashMap::new(),
+            pt: HashMap::new(),
+            ways: HashMap::new(),
+            stops: HashMap::new(),
         };
         for (req_tx, res_rx) in workers.into_iter() {
             drop(req_tx);
             let worker_collecteddata = res_rx.recv().unwrap();
-            collecteddata.nodeslat.extend(worker_collecteddata.nodeslat);
-            collecteddata.nodeslon.extend(worker_collecteddata.nodeslon);
+            collecteddata.pt.extend(worker_collecteddata.pt);
+            // TODO: these two are wrong, we need to merge the Vecs for the same key
+            // collecteddata.ways.extend(worker_collecteddata.ways);
+            // collecteddata.stops.extend(worker_collecteddata.stops);
         }
 
-        let mut avglat = 0.0;
         let mut count = 0;
-        for (_key, value) in collecteddata.nodeslat.iter() {
+        for (key, value) in collecteddata.pt.iter() {
             count += 1;
-            avglat += value;
+            print!("{:?}: {:?}\n", key, value.name);
         }
-        print!("avg lat: {:?}", avglat / count as f64);
-
-        let mut avglon = 0.0;
-        let mut count = 0;
-        for (_key, value) in collecteddata.nodeslon.iter() {
-            count += 1;
-            avglon += value;
-        }
-        print!("avg lon: {:?}", avglon / count as f64);
+        print!("\nFound {:?} relations\n", count);
 
     }
 }
