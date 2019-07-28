@@ -7,5 +7,8 @@ license = "AGPL-3.0-or-later"
 readme = "README.md"
 
 [dependencies]
-osm_pbf_iter = { git = "https://github.com/astro/rust-osm-pbf-iter" }
-num_cpus = "^1.10"
+# osm_pbf_iter = { git = "https://github.com/astro/rust-osm-pbf-iter" }
+osm_pbf_iter = { git = "https://github.com/cualbondi/rust-osm-pbf-iter" }
+# osm_pbf_iter = { path = "../rust-osm-pbf-iter" }
+num_cpus = "1.10"
+
