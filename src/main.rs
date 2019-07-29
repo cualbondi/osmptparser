@@ -9,20 +9,20 @@ use std::thread;
 
 use osm_pbf_iter::*;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct NodeData {
     id: u64,
     lat: f64,
     lon: f64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct WayData {
     id: u64,
     nodes: Vec<NodeData>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct RelationData {
     name: String,
     fixed_way: Vec<NodeData>,
@@ -56,7 +56,9 @@ struct MessageNodesTX {
     stops_cache: StopsCache,
     nodes_cache: NodesCache,
 }
-type MessageNodesRX = HashMap<u64, NodeData>;
+struct MessageNodesRX {
+    nodes: HashMap<u64, NodeData>,
+}
 
 
 // worker which processes one part of the data
@@ -169,6 +171,44 @@ fn ways_parser_worker(req_rx: Receiver<MessageWaysTX>, res_tx: SyncSender<Messag
                                     lat: 0f64,
                                     lon: 0f64,
                                 }).collect(),
+                            }
+                        );
+                    }
+                },
+                _ => {}
+            }
+        }
+    }
+
+    res_tx.send(collecteddata).unwrap();
+}
+
+// worker which processes one part of the data
+fn nodes_parser_worker(req_rx: Receiver<MessageNodesTX>, res_tx: SyncSender<MessageNodesRX>) {
+
+    let mut collecteddata = MessageNodesRX {
+        nodes: HashMap::new(),
+    };
+    loop {
+        let message = match req_rx.recv() {
+            Ok(message) => message,
+            Err(_) => break,
+        };
+
+        let nodes_cache = message.nodes_cache;
+        let stops_cache = message.stops_cache;
+        let blob = message.blob.into_data();
+        let primitive_block = PrimitiveBlock::parse(&blob);
+        for primitive in primitive_block.primitives() {
+            match primitive {
+                Primitive::Node(node) => {
+                    if nodes_cache.contains_key(&node.id) || stops_cache.contains_key(&node.id) {
+                        collecteddata.nodes.insert(
+                            node.id,
+                            NodeData {
+                                id: node.id,
+                                lat: node.lat,
+                                lon: node.lon,
                             }
                         );
                     }
@@ -298,23 +338,104 @@ fn main() {
         }
     }
 
+
+    /*
+        pbf nodes collect
+    */
+    {
+        let mut workers = Vec::with_capacity(cpus);
+        for _ in 0..cpus {
+            let (req_tx, req_rx) = sync_channel(2);
+            let (res_tx, res_rx) = sync_channel(0);
+            workers.push((req_tx, res_rx));
+            thread::spawn(move || {
+                nodes_parser_worker(req_rx, res_tx);
+            });
+        }
+
+        let f = File::open(&pbf_filename).unwrap();
+        let mut reader = BlobReader::new(BufReader::new(f));
+
+        let mut w = 0;
+        for blob in &mut reader {
+            let req_tx = &workers[w].0;
+            w = (w + 1) % cpus;
+            req_tx.send(MessageNodesTX {
+                blob: blob,
+                stops_cache: collecteddata.stops_cache.clone(),
+                nodes_cache: collecteddata.nodes_cache.clone(),
+            }).unwrap();
+        }
+
+        // reduce / join all data from workers into one structure
+        for (req_tx, res_rx) in workers.into_iter() {
+            drop(req_tx);
+            let worker_collecteddata = res_rx.recv().unwrap();
+            for (node_id, node_data) in worker_collecteddata.nodes.iter() {
+                match collecteddata.stops_cache.get(&node_id) {
+                    Some(relation_ids) => {
+                        for relation_id in relation_ids {
+                            match collecteddata.pt.get_mut(relation_id) {
+                                Some(rel) => {
+                                    rel
+                                    .stops
+                                    .entry(*node_id)
+                                    .or_insert_with(|| (*node_data).clone());
+                                },
+                                _ => ()
+                            }
+                        }
+                    },
+                    _ => ()
+                }
+                match collecteddata.nodes_cache.get(&node_id) {
+                    Some(way_ids) => {
+                        for way_id in way_ids {
+                            match collecteddata.ways_cache.get(&way_id) {
+                                Some(relation_ids) => {
+                                    for relation_id in relation_ids {
+                                        match collecteddata.pt.get_mut(relation_id) {
+                                            Some(rel) => {
+                                                match rel.ways.get_mut(way_id) {
+                                                    Some(way) => {
+                                                        for node in way.nodes.iter_mut() {
+                                                            node.lat = node_data.lat;
+                                                            node.lon = node_data.lon;
+                                                        };
+                                                    },
+                                                    _ => ()
+                                                }
+                                            },
+                                            _ => ()
+                                        }
+                                    }
+                                },
+                                _ => ()
+                            }
+                        }
+                    },
+                    _ => ()
+                }
+            }
+        }
+    }
+
     let mut count = 0;
     for (key, value) in collecteddata.pt.iter() {
         count += 1;
         let ways = value.ways.iter().count();
         let stops = value.stops.iter().count();
-        let mut nodes: Vec<u64> = value.ways
+        let mut nodes: Vec<NodeData> = value.ways
             .iter()
             .map(|w| {
-                let ns: Vec<u64> = w.1.nodes.iter().map(|n| n.id).collect();
+                // let ns: Vec<u64> = w.1.nodes.iter().map(|n| n.id).collect();
+                let ns: Vec<NodeData> = w.1.nodes.clone();
                 ns
             })
             .flatten()
             .collect();
-        nodes.sort_unstable();
-        nodes.dedup();
         let nodes_count = nodes.iter().count();
-        print!("{:?}: ways {:?}, stops {:?}, nodes {:?}, {:?}\n", key, ways, stops, nodes_count, value.name);
+        print!("{:?}: ways {:?}, stops {:?}, nodes {:?}, {:?}\nNODES: {:?}\n\n", key, ways, stops, nodes_count, value.name, nodes);
     }
     print!("\nFound {:?} relations\n", count);
 
