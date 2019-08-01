@@ -1,7 +1,7 @@
 extern crate osm_pbf_iter;
 extern crate num_cpus;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufReader};
 use std::sync::mpsc::{sync_channel};
@@ -15,40 +15,39 @@ struct NodeData {
     id: u64,
     lat: f64,
     lon: f64,
+    tags: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
 struct WayData {
     id: u64,
-    nodes: Vec<NodeData>,
+    tags: HashMap<String, String>,
+    nodes: Vec<u64>,
 }
 
 #[derive(Clone, Debug)]
 struct RelationData {
-    name: String,
-    fixed_way: Vec<NodeData>,
+    id: u64,
+    tags: HashMap<String, String>,
+    ways: Vec<u64>,
+    stops: Vec<u64>,
+}
+
+type WayIdsSet = HashSet<u64>;
+type NodeIdsSet = HashSet<u64>;
+
+struct MessageRelations {
+    relations: Vec<RelationData>,
+    stop_ids: NodeIdsSet,
+    way_ids: WayIdsSet,
+}
+
+struct MessageWays {
     ways: HashMap<u64, WayData>,
-    stops: HashMap<u64, NodeData>,
+    node_ids: NodeIdsSet,
 }
 
-type WaysCache = HashMap<u64, Vec<u64>>;
-type StopsCache = HashMap<u64, Vec<u64>>;
-type NodesCache = HashMap<u64, Vec<u64>>;
-
-#[derive(Clone)]
-struct Data {
-    pt: HashMap<u64, RelationData>, // { relation_id: { name: name, fixed_way: Vec<LatLon>, ways: { way_id: { name: name, nodes: { node_id: { lat: lat, lng: lng } } } } } }
-    ways_cache: WaysCache, // aux structure { way_id: [ relation_id ] }
-    stops_cache: StopsCache, // aux structure { node_id: [ relation_id ] }
-    nodes_cache: NodesCache, // aux structure { node_id: [ way_id ] }
-}
-
-struct MessageWaysRX {
-    ways: HashMap<u64, WayData>,
-    nodes_cache: NodesCache,
-}
-
-struct MessageNodesRX {
+struct MessageNodes {
     nodes: HashMap<u64, NodeData>,
 }
 
@@ -68,12 +67,11 @@ fn main() {
 
 
     let cpus = num_cpus::get();
-    let collecteddata_main = Arc::new(RwLock::new(Data {
-        pt: HashMap::new(),
-        ways_cache: HashMap::new(),
-        stops_cache: HashMap::new(),
-        nodes_cache: HashMap::new(),
-    }));
+    let mut relations = Vec::new() as Vec<RelationData>;
+    let mut ways = HashMap::new() as HashMap<u64, WayData>;
+    let mut nodes = HashMap::new() as HashMap<u64, NodeData>;
+    let way_ids = Arc::new(RwLock::new(HashSet::new() as WayIdsSet));
+    let node_ids = Arc::new(RwLock::new(HashSet::new() as NodeIdsSet));
 
     /*
         pbf relations collect
@@ -91,12 +89,9 @@ fn main() {
                 let routetypes_all   = ["train", "subway", "monorail", "tram", "light_rail", "bus", "trolleybus"];
                 let wayroles         = ["", "forward", "backward", "alternate"];
 
-                let mut collecteddata = Data {
-                    pt: HashMap::new(),
-                    ways_cache: HashMap::new(),
-                    stops_cache: HashMap::new(),
-                    nodes_cache: HashMap::new(),
-                };
+                let mut relations = Vec::new() as Vec<RelationData>;
+                let mut stop_ids = HashSet::new() as NodeIdsSet;
+                let mut way_ids = HashSet::new() as WayIdsSet;
                 loop {
                     let blob = match req_rx.recv() {
                         Ok(blob) => blob,
@@ -114,38 +109,24 @@ fn main() {
                                 if routemastertag == None && routetag != None && routetypes_all.contains(&routetag.unwrap().1) && nametag != None {
                                     // condicion para saber si esta relation es un public transport
                                     let mut rd = RelationData {
-                                        name: nametag.unwrap().1.to_string(),
-                                        ways: HashMap::new(),
-                                        stops: HashMap::new(),
-                                        fixed_way: Vec::new(),
+                                        id: relation.id,
+                                        tags: relation.tags().map(|t| (t.0.to_string(), t.1.to_string())).collect(),
+                                        ways: Vec::new(),
+                                        stops: Vec::new(),
                                     };
                                     for member in relation.members() {
                                         // member = (role: &str, id: u64, type: RelationMemberType)
                                         if member.2 == RelationMemberType::Way && wayroles.contains(&member.0) {
-                                            collecteddata.ways_cache
-                                                .entry(member.1)
-                                                .or_insert_with(Vec::new)
-                                                .push(relation.id);
-                                            // this is wrong, should be a vector, it could be the same way more than once
-                                            rd.ways.insert(member.1, WayData {
-                                                id: member.1,
-                                                nodes: Vec::new(),
-                                            });
+                                            rd.ways.push(member.1);
+                                            way_ids.insert(member.1);
                                         }
                                         if member.2 == RelationMemberType::Node {
-                                            collecteddata.stops_cache
-                                                .entry(member.1)
-                                                .or_insert_with(Vec::new)
-                                                .push(relation.id);
-                                            rd.stops.insert(member.1, NodeData {
-                                                id: member.1,
-                                                lat: 0f64,
-                                                lon: 0f64,
-                                            });
+                                            rd.stops.push(member.1);
+                                            stop_ids.insert(member.1);
                                         }
                                     }
                                     if rd.ways.len() > 0 {
-                                        collecteddata.pt.insert(relation.id, rd);
+                                        relations.push(rd);
                                     }
                                     else {
                                         println!("WARNING: relation has no ways 'https://www.openstreetmap.org/relation/{:?}'", relation.id);
@@ -157,7 +138,11 @@ fn main() {
                     }
                 }
 
-                res_tx.send(collecteddata).unwrap();
+                res_tx.send(MessageRelations {
+                    relations,
+                    stop_ids,
+                    way_ids,
+                }).unwrap();
 
             });
         }
@@ -175,29 +160,15 @@ fn main() {
         print!("START relations reduce\n");
         // reduce / join all data from workers into one structure
         {
-            let mut collecteddata_main_write = collecteddata_main.write().unwrap();
+            // write lock
+            let mut node_ids_write = node_ids.write().unwrap();
+            let mut way_ids_write = way_ids.write().unwrap();
             for (req_tx, res_rx) in workers.into_iter() {
                 drop(req_tx);
-                let worker_collecteddata = res_rx.recv().unwrap();
-                collecteddata_main_write.pt.extend(worker_collecteddata.pt);
-                // for (relation_id, relation_data) in worker_collecteddata.pt.iter() {
-                //     collecteddata.pt.entry(*relation_id)
-                //         .and_modify(|rd| {
-                //             rd.ways.extend(relation_data.ways.clone());
-                //             rd.stops.extend(relation_data.stops.clone());
-                //         })
-                //         .or_insert(relation_data.clone());
-                // }
-                for (way_id, relation_ids) in worker_collecteddata.ways_cache.iter() {
-                    collecteddata_main_write.ways_cache.entry(*way_id)
-                        .or_insert_with(Vec::new)
-                        .extend(relation_ids)
-                }
-                for (way_id, relation_ids) in worker_collecteddata.stops_cache.iter() {
-                    collecteddata_main_write.stops_cache.entry(*way_id)
-                        .or_insert_with(Vec::new)
-                        .extend(relation_ids)
-                }
+                let worker_data = res_rx.recv().unwrap();
+                relations.extend(worker_data.relations);
+                node_ids_write.extend(worker_data.stop_ids);
+                way_ids_write.extend(worker_data.way_ids);
             }
         } // write lock
     }
@@ -212,13 +183,12 @@ fn main() {
             let (req_tx, req_rx) = sync_channel(2);
             let (res_tx, res_rx) = sync_channel(0);
             workers.push((req_tx, res_rx));
-            let collecteddata_main_local = collecteddata_main.clone();
+            let way_ids_local = way_ids.clone();
             thread::spawn(move || {
-                // ways_parser_worker(req_rx, res_tx);
-                let mut collecteddata = MessageWaysRX {
-                    ways: HashMap::new(),
-                    nodes_cache: HashMap::new(),
-                };
+
+                let mut ways = HashMap::new() as HashMap<u64, WayData>;
+                let mut node_ids = HashSet::new() as NodeIdsSet;
+                let way_ids_read = way_ids_local.read().unwrap();
                 loop {
                     let blob = match req_rx.recv() {
                         Ok(blob) => blob,
@@ -230,23 +200,16 @@ fn main() {
                     for primitive in primitive_block.primitives() {
                         match primitive {
                             Primitive::Way(way) => {
-                                let collecteddata_main_read = collecteddata_main_local.read().unwrap();
-                                if collecteddata_main_read.ways_cache.contains_key(&way.id) {
+                                if way_ids_read.contains(&way.id) {
                                     for node in way.refs() {
-                                        collecteddata.nodes_cache
-                                            .entry(node as u64)
-                                            .or_insert_with(Vec::new)
-                                            .push(way.id);
+                                        node_ids.insert(node as u64);
                                     }
-                                    collecteddata.ways.insert(
+                                    ways.insert(
                                         way.id,
                                         WayData {
                                             id: way.id,
-                                            nodes: way.refs().map(|n| NodeData {
-                                                id: n as u64,
-                                                lat: 0f64,
-                                                lon: 0f64,
-                                            }).collect(),
+                                            tags: way.tags().map(|t| (t.0.to_string(), t.1.to_string())).collect(),
+                                            nodes: way.refs().map(|id| id as u64).collect(),
                                         }
                                     );
                                 }
@@ -256,7 +219,10 @@ fn main() {
                     }
                 }
 
-                res_tx.send(collecteddata).unwrap();
+                res_tx.send(MessageWays {
+                    ways,
+                    node_ids,
+                }).unwrap();
             });
         }
 
@@ -273,21 +239,12 @@ fn main() {
         print!("START ways reduce\n");
         // reduce / join all data from workers into one structure
         {
-            let mut collecteddata_main_write = collecteddata_main.write().unwrap();
+            let mut node_ids_write = node_ids.write().unwrap();
             for (req_tx, res_rx) in workers.into_iter() {
                 drop(req_tx);
-                let worker_collecteddata = res_rx.recv().unwrap();
-                for (node_id, ways_ids) in worker_collecteddata.nodes_cache.iter() {
-                    collecteddata_main_write.nodes_cache.entry(*node_id)
-                        .or_insert_with(Vec::new)
-                        .extend(ways_ids)
-                }
-                for (way_id, way_data) in worker_collecteddata.ways.iter() {
-                    for (_, v) in collecteddata_main_write.pt.iter_mut() {
-                        v.ways.entry(*way_id)
-                            .and_modify(|w| w.nodes = way_data.nodes.clone());
-                    }
-                }
+                let worker_data = res_rx.recv().unwrap();
+                ways.extend(worker_data.ways);
+                node_ids_write.extend(worker_data.node_ids);
             }
         } // write lock
     }
@@ -303,12 +260,11 @@ fn main() {
             let (req_tx, req_rx) = sync_channel(2);
             let (res_tx, res_rx) = sync_channel(0);
             workers.push((req_tx, res_rx));
-            let collecteddata_main_local = collecteddata_main.clone();
+            let node_ids_local = node_ids.clone();
             thread::spawn(move || {
                 // nodes_parser_worker(req_rx, res_tx);
-                let mut collecteddata = MessageNodesRX {
-                    nodes: HashMap::new(),
-                };
+                let node_ids_read = node_ids_local.read().unwrap();
+                let mut nodes = HashMap::new() as HashMap<u64, NodeData>;
                 loop {
                     let blob = match req_rx.recv() {
                         Ok(blob) => blob,
@@ -320,12 +276,12 @@ fn main() {
                     for primitive in primitive_block.primitives() {
                         match primitive {
                             Primitive::Node(node) => {
-                                let collecteddata_main_read = collecteddata_main_local.read().unwrap();
-                                if collecteddata_main_read.nodes_cache.contains_key(&node.id) || collecteddata_main_read.stops_cache.contains_key(&node.id) {
-                                    collecteddata.nodes.insert(
+                                if node_ids_read.contains(&node.id) {
+                                    nodes.insert(
                                         node.id,
                                         NodeData {
                                             id: node.id,
+                                            tags: node.tags.into_iter().map(|t| (t.0.to_string(), t.1.to_string())).collect(),
                                             lat: node.lat,
                                             lon: node.lon,
                                         }
@@ -337,7 +293,9 @@ fn main() {
                     }
                 }
 
-                res_tx.send(collecteddata).unwrap();
+                res_tx.send(MessageNodes {
+                    nodes,
+                }).unwrap();
             });
         }
 
@@ -353,83 +311,31 @@ fn main() {
 
         print!("START nodes reduce\n");
         // reduce / join all data from workers into one structure
-        // TODO: remove clone()s, Improve algorithm, maybe use some reducer/par_fold()
         {
-            let mut collecteddata_main_write = collecteddata_main.write().unwrap();
-            let stops_cache = collecteddata_main_write.stops_cache.clone();
-            let nodes_cache = collecteddata_main_write.nodes_cache.clone();
-            let ways_cache = collecteddata_main_write.ways_cache.clone();
             for (req_tx, res_rx) in workers.into_iter() {
                 drop(req_tx);
-                print!("- join\n");
-                let worker_collecteddata = res_rx.recv().unwrap();
-                for (node_id, node_data) in worker_collecteddata.nodes.iter() {
-                    match stops_cache.get(&node_id) {
-                        Some(relation_ids) => {
-                            for relation_id in relation_ids {
-                                match collecteddata_main_write.pt.get_mut(relation_id) {
-                                    Some(rel) => {
-                                        rel
-                                        .stops
-                                        .entry(*node_id)
-                                        .or_insert_with(|| (*node_data).clone());
-                                    },
-                                    _ => ()
-                                }
-                            }
-                        },
-                        _ => ()
-                    }
-                    match nodes_cache.get(&node_id) {
-                        Some(way_ids) => {
-                            for way_id in way_ids {
-                                match ways_cache.get(&way_id) {
-                                    Some(relation_ids) => {
-                                        for relation_id in relation_ids {
-                                            match collecteddata_main_write.pt.get_mut(relation_id) {
-                                                Some(rel) => {
-                                                    match rel.ways.get_mut(way_id) {
-                                                        Some(way) => {
-                                                            for node in way.nodes.iter_mut() {
-                                                                node.lat = node_data.lat;
-                                                                node.lon = node_data.lon;
-                                                            };
-                                                        },
-                                                        _ => ()
-                                                    }
-                                                },
-                                                _ => ()
-                                            }
-                                        }
-                                    },
-                                    _ => ()
-                                }
-                            }
-                        },
-                        _ => ()
-                    }
-                } // for node
-            } // for worker
+                let worker_data = res_rx.recv().unwrap();
+                nodes.extend(worker_data.nodes);
+            }
         } // write lock
     } // local vars block
 
     print!("Preparing to print\n");
     let mut count = 0;
-    for (key, value) in collecteddata_main.write().unwrap().pt.iter() {
+    for relation in relations {
         count += 1;
-        let ways = value.ways.iter().count();
-        let stops = value.stops.iter().count();
-        let nodes: Vec<NodeData> = value.ways
+        let ways_count = relation.ways.len();
+        let stops_count = relation.stops.len();
+        let nodes_count = relation.ways
             .iter()
-            .map(|w| {
-                // let ns: Vec<u64> = w.1.nodes.iter().map(|n| n.id).collect();
-                let ns: Vec<NodeData> = w.1.nodes.clone();
-                ns
+            .map(|wid| {
+                match ways.get(wid) {
+                    Some(way) => way.nodes.len(),
+                    None => 0
+                }
             })
-            .flatten()
-            .collect();
-        let nodes_count = nodes.iter().count();
-        print!("{:?}: ways {:?}, stops {:?}, nodes {:?}, {:?}\n", key, ways, stops, nodes_count, value.name);
+            .fold(0, |a, b| a + b);
+        print!("{:?}: ways {:?}, stops {:?}, nodes {:?}, {:?}\n", relation.id, ways_count, stops_count, nodes_count, relation.tags["name"]);
     }
     print!("\nFound {:?} relations\n", count);
 
