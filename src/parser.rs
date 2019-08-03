@@ -1,5 +1,4 @@
 extern crate osm_pbf_iter;
-extern crate num_cpus;
 extern crate fxhash;
 
 use std::fs::File;
@@ -9,7 +8,7 @@ use std::thread;
 use std::sync::{Arc, RwLock};
 use std::fmt;
 
-use osm_pbf_iter::*;
+use osm_pbf_iter::{PrimitiveBlock, Blob, Primitive, RelationMemberType, BlobReader};
 use fxhash::FxHashSet;
 use fxhash::FxHashMap;
 
@@ -58,13 +57,36 @@ pub struct Parser {
     relations: Vec<RelationData>,
     ways: FxHashMap<u64, WayData>,
     nodes: FxHashMap<u64, NodeData>,
+    iter_index: usize,
+}
+
+#[derive(Clone, Debug)]
+struct Node {
+    id: u64,
+    tags: FxHashMap<String, String>,
+    lat: f64,
+    lon: f64,
+}
+
+#[derive(Clone, Debug)]
+struct Way {
+    id: u64,
+    tags: FxHashMap<String, String>,
+    nodes: Vec<Node>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Relation {
+    id: u64,
+    tags: FxHashMap<String, String>,
+    ways: Vec<Way>,
+    stops: Vec<Node>,
 }
 
 impl Parser {
 
-    pub fn new(pbf_filename: &str) -> Self {
+    pub fn new(pbf_filename: &str, cpus: usize) -> Self {
 
-        let cpus = num_cpus::get();
         let mut relations = Vec::new() as Vec<RelationData>;
         let mut ways = FxHashMap::default() as FxHashMap<u64, WayData>;
         let mut nodes = FxHashMap::default() as FxHashMap<u64, NodeData>;
@@ -323,6 +345,7 @@ impl Parser {
             relations,
             ways,
             nodes,
+            iter_index: 0usize,
         }
     }
 
@@ -352,5 +375,39 @@ impl fmt::Debug for Parser {
     }
 }
 
-// TODO: implement iterator returning a full relation in each iteration
-// TODO: implement fix_ways within the iterator maybe?, maybe another struct is needed to represent a vec of ways that implements fix() or maybe a better name flatten() or flattenfix()
+impl Iterator for Parser {
+    type Item = Relation;
+
+    fn next(&mut self) -> Option<Relation> {
+        if self.iter_index >= self.relations.len() {
+            None
+        }
+        else {
+            let relation_data = &self.relations[self.iter_index];
+            let relation = Relation {
+                id: relation_data.id,
+                tags: relation_data.tags.clone(),
+                ways: relation_data.ways.iter().map(|wid| Way {
+                    id: *wid,
+                    tags: self.ways[&wid].tags.clone(),
+                    nodes: self.ways[&wid].nodes.iter().map(|nid| Node {
+                        id: *nid,
+                        tags: self.nodes[&nid].tags.clone(),
+                        lat: self.nodes[&nid].lat,
+                        lon: self.nodes[&nid].lon,
+                    }).collect(),
+                }).collect(),
+                stops: relation_data.stops.iter().map(|nid| Node {
+                    id: *nid,
+                    tags: self.nodes[&nid].tags.clone(),
+                    lat: self.nodes[&nid].lat,
+                    lon: self.nodes[&nid].lon,
+                }).collect(),
+            };
+            // TODO: call fix_ways here
+            // TODO: implement fix_ways within the iterator maybe?, maybe another struct is needed to represent a vec of ways that implements fix() or maybe a better name flatten() or flattenfix()
+            self.iter_index += 1usize;
+            Some(relation)
+        }
+    }
+}

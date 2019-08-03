@@ -1,3 +1,4 @@
+extern crate num_cpus;
 mod parser;
 
 fn main() {
@@ -7,7 +8,9 @@ fn main() {
     }
     let pbf_filename = pbf_filename_option.unwrap();
 
-    let parser = parser::Parser::new(&pbf_filename);
+    let parser = parser::Parser::new(&pbf_filename, num_cpus::get());
 
-    print!("{:?} {}", parser, pbf_filename);
+    for p in parser {
+        print!("{:?}", p);
+    }
 }
