@@ -1,5 +1,7 @@
 extern crate osm_pbf_iter;
 extern crate fxhash;
+extern crate rayon;
+pub mod relation;
 
 use std::fs::File;
 use std::io::{BufReader};
@@ -8,9 +10,11 @@ use std::thread;
 use std::sync::{Arc, RwLock};
 use std::fmt;
 
+
 use osm_pbf_iter::{PrimitiveBlock, Blob, Primitive, RelationMemberType, BlobReader};
 use fxhash::FxHashSet;
 use fxhash::FxHashMap;
+use relation::{Relation, Way, Node};
 
 #[derive(Clone, Debug)]
 struct NodeData {
@@ -57,30 +61,11 @@ pub struct Parser {
     relations: Vec<RelationData>,
     ways: FxHashMap<u64, WayData>,
     nodes: FxHashMap<u64, NodeData>,
-    iter_index: usize,
 }
 
-#[derive(Clone, Debug)]
-struct Node {
-    id: u64,
-    tags: FxHashMap<String, String>,
-    lat: f64,
-    lon: f64,
-}
-
-#[derive(Clone, Debug)]
-struct Way {
-    id: u64,
-    tags: FxHashMap<String, String>,
-    nodes: Vec<Node>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Relation {
-    id: u64,
-    tags: FxHashMap<String, String>,
-    ways: Vec<Way>,
-    stops: Vec<Node>,
+pub struct RelationIterator {
+    index: usize,
+    data: Parser,
 }
 
 impl Parser {
@@ -339,13 +324,68 @@ impl Parser {
                 }
             } // write lock
         } // local vars block
+        print!("END processing\n");
 
 
         Parser {
             relations,
             ways,
             nodes,
-            iter_index: 0usize,
+        }
+    }
+
+    pub fn iter(self) -> RelationIterator {
+        RelationIterator {
+            data: self,
+            index: 0,
+        }
+    }
+
+    pub fn get_at(&self, index: usize) -> Relation {
+        let relation_data = self.relations[index].clone();
+        let rel = Relation {
+            id: relation_data.id,
+            tags: relation_data.tags,
+            ways: relation_data.ways.iter()
+                .filter(|wid|
+                    self.ways.contains_key(&wid)
+                )
+                .map(|wid| Way {
+                    id: *wid,
+                    tags: self.ways[&wid].tags.clone(),
+                    nodes: self.ways[&wid].nodes.iter()
+                        .filter(|nid|
+                            self.nodes.contains_key(&nid)
+                        )
+                        .map(|nid| Node {
+                            id: *nid,
+                            tags: self.nodes[&nid].tags.clone(),
+                            lat: self.nodes[&nid].lat,
+                            lon: self.nodes[&nid].lon,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            stops: relation_data.stops.iter()
+                .filter(|nid|
+                    self.nodes.contains_key(&nid)
+                )
+                .map(|nid| Node {
+                    id: *nid,
+                    tags: self.nodes[&nid].tags.clone(),
+                    lat: self.nodes[&nid].lat,
+                    lon: self.nodes[&nid].lon,
+                })
+                .collect(),
+            // flattened: Vec::new(),
+        };
+        // let flattened = rel.flatten_ways(0f64).unwrap();
+        Relation {
+            id: rel.id,
+            tags: rel.tags,
+            ways: rel.ways,
+            stops: rel.stops,
+            // flattened,
         }
     }
 
@@ -375,39 +415,25 @@ impl fmt::Debug for Parser {
     }
 }
 
-impl Iterator for Parser {
+impl Iterator for RelationIterator {
     type Item = Relation;
 
     fn next(&mut self) -> Option<Relation> {
-        if self.iter_index >= self.relations.len() {
+        if self.index >= self.data.relations.len() {
             None
         }
         else {
-            let relation_data = &self.relations[self.iter_index];
-            let relation = Relation {
-                id: relation_data.id,
-                tags: relation_data.tags.clone(),
-                ways: relation_data.ways.iter().map(|wid| Way {
-                    id: *wid,
-                    tags: self.ways[&wid].tags.clone(),
-                    nodes: self.ways[&wid].nodes.iter().map(|nid| Node {
-                        id: *nid,
-                        tags: self.nodes[&nid].tags.clone(),
-                        lat: self.nodes[&nid].lat,
-                        lon: self.nodes[&nid].lon,
-                    }).collect(),
-                }).collect(),
-                stops: relation_data.stops.iter().map(|nid| Node {
-                    id: *nid,
-                    tags: self.nodes[&nid].tags.clone(),
-                    lat: self.nodes[&nid].lat,
-                    lon: self.nodes[&nid].lon,
-                }).collect(),
-            };
-            // TODO: call fix_ways here
-            // TODO: implement fix_ways within the iterator maybe?, maybe another struct is needed to represent a vec of ways that implements fix() or maybe a better name flatten() or flattenfix()
-            self.iter_index += 1usize;
+            let relation = self.data.get_at(self.index);
+            self.index += 1usize;
             Some(relation)
         }
+    }
+}
+
+impl IntoIterator for Parser {
+    type Item = Relation;
+    type IntoIter = RelationIterator;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
