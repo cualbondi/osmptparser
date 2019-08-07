@@ -1,6 +1,5 @@
 extern crate osm_pbf_iter;
 extern crate fxhash;
-extern crate rayon;
 pub mod relation;
 // mod buffered_iterator;
 
