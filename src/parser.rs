@@ -340,8 +340,10 @@ impl Parser {
         self.par_map(|r| {
                 let f = r.flatten_ways(150_f64).unwrap();
                 PublicTransport {
-                    osm_data: r,
-                    linestring: f,
+                    id: r.id,
+                    tags: r.tags,
+                    stops: r.stops,
+                    geometry: f.iter().map(|v| v.iter().map(|n| (n.lon, n.lat)).collect()).collect(),
                 }
             }
         )

@@ -32,10 +32,14 @@ pub struct Relation {
     pub stops: Vec<Node>,
 }
 
+type LonLat = (f64, f64);
+
 #[derive(Clone, Debug)]
 pub struct PublicTransport {
-    pub osm_data: Relation,
-    pub linestring: Vec<Vec<Node>>,
+    pub id: u64,
+    pub tags: FxHashMap<String, String>,
+    pub stops: Vec<Node>,
+    pub geometry: Vec<Vec<LonLat>>,
 }
 
 fn pointdistance(p1: &Node, p2: &Node) -> f64 {
