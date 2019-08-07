@@ -1,7 +1,6 @@
 extern crate osm_pbf_iter;
 extern crate fxhash;
 pub mod relation;
-// mod buffered_iterator;
 
 use std::fs::File;
 use std::io::{BufReader};
@@ -16,7 +15,6 @@ use fxhash::FxHashSet;
 use fxhash::FxHashMap;
 
 use relation::{Relation, Way, Node, PublicTransport};
-// use buffered_iterator::{BufferedIterator};
 
 #[derive(Clone, Debug)]
 struct NodeData {
@@ -440,7 +438,6 @@ impl Parser {
                     lon: self.nodes[&nid].lon,
                 })
                 .collect(),
-            // flattened: Vec::new(),
         }
     }
 
