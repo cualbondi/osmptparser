@@ -356,6 +356,7 @@ impl Parser {
             T: Send + 'static,
     {
         let cpus = self.cpus;
+        let length = self.relations.len();
         let mut workers = Vec::with_capacity(cpus);
         let index = Arc::new(RwLock::new(AtomicUsize::new(0)));
         let this = Arc::new(RwLock::new(self));
@@ -385,7 +386,7 @@ impl Parser {
         };
 
         // reduce / join all data from workers into one structure
-        let mut relations = Vec::new();
+        let mut relations = Vec::with_capacity(length);
         let mut errors = 0;
         while errors < cpus {
             errors = 0;
