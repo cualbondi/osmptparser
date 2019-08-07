@@ -2,6 +2,7 @@ extern crate osm_pbf_iter;
 extern crate fxhash;
 extern crate rayon;
 pub mod relation;
+// mod buffered_iterator;
 
 use std::fs::File;
 use std::io::{BufReader};
@@ -9,12 +10,14 @@ use std::sync::mpsc::{sync_channel};
 use std::thread;
 use std::sync::{Arc, RwLock};
 use std::fmt;
-
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use osm_pbf_iter::{PrimitiveBlock, Blob, Primitive, RelationMemberType, BlobReader};
 use fxhash::FxHashSet;
 use fxhash::FxHashMap;
-use relation::{Relation, Way, Node};
+
+use relation::{Relation, Way, Node, PublicTransport};
+// use buffered_iterator::{BufferedIterator};
 
 #[derive(Clone, Debug)]
 struct NodeData {
@@ -61,6 +64,7 @@ pub struct Parser {
     relations: Vec<RelationData>,
     ways: FxHashMap<u64, WayData>,
     nodes: FxHashMap<u64, NodeData>,
+    cpus: usize,
 }
 
 pub struct RelationIterator {
@@ -134,7 +138,7 @@ impl Parser {
                                             relations.push(rd);
                                         }
                                         else {
-                                            println!("WARNING: relation has no ways 'https://www.openstreetmap.org/relation/{:?}'", relation.id);
+                                            // println!("WARNING: relation has no ways 'https://www.openstreetmap.org/relation/{:?}'", relation.id);
                                         }
                                     }
                                 },
@@ -331,21 +335,80 @@ impl Parser {
             relations,
             ways,
             nodes,
+            cpus,
         }
     }
 
-    pub fn iter(self) -> RelationIterator {
-        RelationIterator {
-            data: self,
-            index: 0,
-        }
+    pub fn get_public_transports(self) -> Vec<PublicTransport> {
+        self.par_map(|r| {
+                let f = r.flatten_ways(150_f64).unwrap();
+                PublicTransport {
+                    osm_data: r,
+                    linestring: f,
+                }
+            }
+        )
     }
 
-    pub fn get_at(&self, index: usize) -> Relation {
-        let relation_data = self.relations[index].clone();
-        let rel = Relation {
+    pub fn par_map<T, F>(self, func: F) -> Vec<T>
+        where
+            F: Fn(Relation) -> T + Sync + Send + Clone + 'static,
+            T: Send + 'static,
+    {
+        let cpus = self.cpus;
+        let mut workers = Vec::with_capacity(cpus);
+        let index = Arc::new(RwLock::new(AtomicUsize::new(0)));
+        let this = Arc::new(RwLock::new(self));
+        for _ in 0..cpus {
+            // let (req_tx, req_rx) = sync_channel(2);
+            let (res_tx, res_rx) = sync_channel(200);
+            workers.push(res_rx);
+            let index_local = index.clone();
+            let this_local = this.clone();
+            let func_local = func.clone();
+            thread::spawn(move || {
+                let this_read = this_local.read().unwrap();
+                loop {
+                    let index;
+                    {
+                        let index_write = index_local.write().unwrap();
+                        index = index_write.fetch_add(1, Ordering::SeqCst);
+                    }
+                    if index >= this_read.relations.len() {
+                        break;
+                    }
+                    let relation = this_read.get_at(index);
+                    let processed = func_local(relation);
+                    res_tx.send(processed).unwrap();
+                }
+            });
+        };
+
+        // reduce / join all data from workers into one structure
+        let mut relations = Vec::new();
+        let mut errors = 0;
+        while errors < cpus {
+            errors = 0;
+            for res_rx in workers.iter() {
+                match res_rx.recv() {
+                    Ok(worker_data) => relations.push(worker_data),
+                    Err(_) => errors = errors + 1,
+                };
+            };
+        };
+        relations
+    }
+
+    fn get_relation_from_id(self, id: u64) -> Relation {
+        let relopt =  self.relations.iter().find(|rel| rel.id == id);
+        let rel = relopt.as_ref().unwrap();
+        self.get_relation_from(rel)
+    }
+
+    fn get_relation_from(&self, relation_data: &RelationData) -> Relation {
+        Relation {
             id: relation_data.id,
-            tags: relation_data.tags,
+            tags: relation_data.tags.clone(),
             ways: relation_data.ways.iter()
                 .filter(|wid|
                     self.ways.contains_key(&wid)
@@ -378,14 +441,18 @@ impl Parser {
                 })
                 .collect(),
             // flattened: Vec::new(),
-        };
-        // let flattened = rel.flatten_ways(0f64).unwrap();
-        Relation {
-            id: rel.id,
-            tags: rel.tags,
-            ways: rel.ways,
-            stops: rel.stops,
-            // flattened,
+        }
+    }
+
+    pub fn get_at(&self, index: usize) -> Relation {
+        let rel = &self.relations[index];
+        self.get_relation_from(rel)
+    }
+
+    pub fn iter(self) -> RelationIterator {
+        RelationIterator {
+            data: self,
+            index: 0,
         }
     }
 
