@@ -1,5 +1,4 @@
 extern crate fxhash;
-use std::error::Error;
 use std::f64::INFINITY;
 use fxhash::FxHashMap;
 
@@ -31,7 +30,12 @@ pub struct Relation {
     pub tags: FxHashMap<String, String>,
     pub ways: Vec<Way>,
     pub stops: Vec<Node>,
-    // pub flattened: Vec<Vec<Node>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PublicTransport {
+    pub osm_data: Relation,
+    pub linestring: Vec<Vec<Node>>,
 }
 
 fn pointdistance(p1: &Node, p2: &Node) -> f64 {
@@ -58,39 +62,11 @@ fn edgedistance(w1: &Vec<Node>, w2: &Vec<Node>) -> f64 {
     })
 }
 
-/// move ways from one place to another to get the closest ones together
-/// the first one is taken as important (the one that sets the direction)
-/// Also joins the way if extreme points are the same
-/// - This is not "expected" by osm. We are trying to fix the way now
-/// - Nevertheless I think this is also done by ST_LineMerge()
-/// TODO: this can probably be made with some std function like vec.sort(|nodesa, nodesb| edgedistance(nodesa, nodesb))
-fn sort_ways(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, Box<Error>> {
-    let mut ws = ways.clone();
-    let mut sorted_ways = Vec::new();
-    sorted_ways.push(ws[0].clone());
-    ws = ws[1..].to_vec();
-    while ws.len() > 0 {
-        let mut mindist = INFINITY;
-        let mut minidx = 0usize;
-        for i in 0..ws.len() {
-            let w = ws[i].clone();
-            let dist = edgedistance(&w, &sorted_ways[sorted_ways.len() - 1]);
-            if dist < mindist {
-                mindist = dist;
-                minidx = i;
-            }
-        }
-        sorted_ways.push(ws[minidx].clone());
-        ws.remove(minidx);
-    };
-    Ok(sorted_ways)
-}
-
 /// try to reverse directions in linestrings
 /// to join segments into a single linestring
 /// - This is normal in openstreetmap format
 /// - Also ST_LineMerge() should do this already
-fn first_pass(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, Box<Error>> {
+fn first_pass(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
     // try to flatten by joining most ways as possible
     let n = ways.len();
     let mut ordered_ways = Vec::new();
@@ -132,15 +108,109 @@ fn first_pass(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, Box<Error>> {
     Ok(ordered_ways)
 }
 
+/// move ways from one place to another to get the closest ones together
+/// the first one is taken as important (the one that sets the direction)
+/// Also joins the way if extreme points are the same
+/// - This is not "expected" by osm. We are trying to fix the way now
+/// - Nevertheless I think this is also done by ST_LineMerge()
+/// TODO: this can probably be made with some std function like vec.sort(|nodesa, nodesb| edgedistance(nodesa, nodesb))
+fn sort_ways(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
+    let mut ws = ways.clone();
+    let mut sorted_ways = Vec::new();
+    sorted_ways.push(ws[0].clone());
+    ws = ws[1..].to_vec();
+    while ws.len() > 0 {
+        let mut mindist = INFINITY;
+        let mut minidx = 0usize;
+        for i in 0..ws.len() {
+            let w = ws[i].clone();
+            let dist = edgedistance(&w, &sorted_ways[sorted_ways.len() - 1]);
+            if dist < mindist {
+                mindist = dist;
+                minidx = i;
+            }
+        }
+        sorted_ways.push(ws[minidx].clone());
+        ws.remove(minidx);
+    };
+    Ok(sorted_ways)
+}
+
+/// calculate haversine distance between two nodes
+fn dist_haversine(p1: &Node, p2: &Node) -> f64 {
+    let lon1 = p1.lon;
+    let lat1 = p1.lat;
+    let lon2 = p2.lon;
+    let lat2 = p2.lat;
+
+    let radius = 6371000_f64;  // meters
+    let dlat = (lat2 - lat1).to_radians();
+    let dlon = (lon2 - lon1).to_radians();
+    let a =
+        (dlat / 2_f64).sin() * (dlat / 2_f64).sin() +
+        lat1.to_radians().cos() * lat2.to_radians().cos() *
+        (dlon / 2_f64).sin() * (dlon / 2_f64).sin()
+    ;
+    let c = 2_f64 * a.sqrt().atan2((1_f64 - a).sqrt());
+    radius * c
+}
+
+/// Join adjacent ways that have their extreme points
+/// closer than <tolerance> in meters
+/// - This is not "expected". We are trying to fix the way now
+/// - This is not done by ST_LineMerge()
+/// - I'm not sure if this conserves the direction from first to last
+fn join_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> Result<Vec<Vec<Node>>, ()>  {
+    let mut joined = Vec::new();
+    joined.push(ways[0].clone());
+    for w in ways[1..].to_vec() {
+        let joined_len = joined.len();
+        let joinedlast = joined[joined_len - 1].clone();
+        if dist_haversine(&joinedlast[joinedlast.len() - 1], &w[0]) < tolerance {
+            joined[joined_len - 1].extend(w);
+        }
+        else if dist_haversine(&joinedlast[joinedlast.len() - 1], &w[w.len() - 1]) < tolerance {
+            let mut wrev = w.clone();
+            wrev.reverse();
+            joined[joined_len - 1].extend(wrev);
+        }
+        else if dist_haversine(&joinedlast[0], &w[0]) < tolerance {
+            joined[joined_len - 1].reverse();
+            joined[joined_len - 1].extend(w);
+        }
+        else if dist_haversine(&joinedlast[0], &w[w.len() - 1]) < tolerance {
+            joined[joined_len - 1].reverse();
+            let mut wrev = w.clone();
+            wrev.reverse();
+            joined[joined_len - 1].extend(wrev);
+        }
+        else {
+            joined.push(w);
+        }
+    }
+    Ok(joined)
+}
+
 impl Relation {
-    pub fn flatten_ways(&self, tolerance: f64) -> Result<Vec<Vec<Node>>, Box<Error>> {
+    pub fn flatten_ways(&self, tolerance: f64) -> Result<Vec<Vec<Node>>, ()> {
         let ways = self.ways.iter().map(|w| w.nodes.clone()).collect();
-        let v = first_pass(&ways)?;
-        if v.len() > 1 {
-            let sorted = sort_ways(&v)?;
-            let sorted_passed = first_pass(&sorted)?;
+        let passed = first_pass(&ways)?;
+        if passed.len() == 1 {
+            return Ok(passed);
+        }
+        let sorted = sort_ways(&passed)?;
+        let sorted_passed = first_pass(&sorted)?;
+        if sorted_passed.len() == 1 {
             return Ok(sorted_passed);
         }
-        Ok(v)
+        let joined = join_ways(&passed, tolerance)?;
+        if joined.len() == 1 {
+            return Ok(joined);
+        }
+        let joined_sorted = join_ways(&sorted, tolerance)?;
+        if joined_sorted.len() == 1 {
+            return Ok(joined_sorted);
+        }
+        Ok(Vec::new())
     }
 }
