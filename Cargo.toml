@@ -11,4 +11,3 @@ osm_pbf_iter = { git = "https://github.com/astro/rust-osm-pbf-iter", rev="a7849e
 # osm_pbf_iter = { path = "../rust-osm-pbf-iter" }
 num_cpus = "1.10"
 fxhash = "0.2.1"
-rayon = "1.1"

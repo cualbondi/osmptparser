@@ -1,5 +1,4 @@
 extern crate num_cpus;
-extern crate rayon;
 mod parser;
 
 fn main() {
