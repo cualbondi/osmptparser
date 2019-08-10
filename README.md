@@ -7,3 +7,18 @@ git clone git@github.com:cualbondi/osmptparser.git
 wget http://download.geofabrik.de/south-america/ecuador-latest.osm.pbf
 cargo run --example main ecuador-latest.osm.pbf
 ```
+
+Time it
+
+```
+cargo build --release --example main && /usr/bin/time -v target/release/examples/main ecuador-latest.osm.pbf
+```
+
+## Build pbf test file
+
+```
+wget http://download.geofabrik.de/south-america/ecuador-latest.osm.pbf
+osmconvert ecuador-latest.osm.pbf -o=ecuador.o5m
+osmfilter ecuador.o5m --keep= --keep-relations="@id=85965 =2030162" > test.o5m
+osmconvert test.o5m -o=test.pbf
+```

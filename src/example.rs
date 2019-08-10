@@ -1,6 +1,4 @@
 extern crate num_cpus;
-extern crate osmptparser;
-
 use osmptparser::Parser;
 
 fn main() {

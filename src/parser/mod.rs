@@ -409,7 +409,7 @@ impl Parser {
     }
 
     /// Builds the Relation from the provided osm_id `id`
-    fn get_relation_from_id(self, id: u64) -> Relation {
+    pub fn get_relation_from_id(self, id: u64) -> Relation {
         let relopt =  self.relations.iter().find(|rel| rel.id == id);
         let rel = relopt.as_ref().unwrap();
         self.get_relation_from(rel)
