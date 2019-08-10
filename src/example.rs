@@ -1,5 +1,7 @@
 extern crate num_cpus;
-mod parser;
+extern crate osmptparser;
+
+use osmptparser::Parser;
 
 fn main() {
     let pbf_filename_option = std::env::args().skip(1).next();
@@ -9,7 +11,7 @@ fn main() {
     let pbf_filename = pbf_filename_option.unwrap();
 
     let nthreads = num_cpus::get();
-    let parser = parser::Parser::new(&pbf_filename, nthreads);
+    let parser = Parser::new(&pbf_filename, nthreads);
 
     let mut accum = 0usize;
     let v1 = parser.get_public_transports();
