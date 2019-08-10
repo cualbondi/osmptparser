@@ -1,6 +1,7 @@
 use std::f64::INFINITY;
 use std::collections::HashMap;
 
+/// OSM node representation with all the relevant osm data (tags and id)
 #[derive(Clone, Debug)]
 pub struct Node {
     pub id: u64,
@@ -16,6 +17,7 @@ impl PartialEq for Node {
 }
 impl Eq for Node {}
 
+/// OSM way representation with all the relevant osm data (tags and ids of all ways and nodes)
 #[derive(Clone, Debug)]
 pub struct Way {
     pub id: u64,
@@ -23,6 +25,7 @@ pub struct Way {
     pub nodes: Vec<Node>,
 }
 
+/// OSM relation representation with all the relevant osm data (tags and ids of relation and all ways and nodes)
 #[derive(Clone, Debug)]
 pub struct Relation {
     pub id: u64,
@@ -33,11 +36,16 @@ pub struct Relation {
 
 type LonLat = (f64, f64);
 
+/// Public transport simple model
 #[derive(Clone, Debug)]
 pub struct PublicTransport {
+    /// osm id
     pub id: u64,
+    /// osm tags of the public transport relation
     pub tags: HashMap<String, String>,
+    /// stop nodes of the public transport relation with latlng and internal tags
     pub stops: Vec<Node>,
+    /// geometry (linestring/multilinestring), best effort fixed
     pub geometry: Vec<Vec<LonLat>>,
 }
 
@@ -195,6 +203,9 @@ fn join_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> Result<Vec<Vec<Node>>, ()
 }
 
 impl Relation {
+    /// best effort get a linestring or multilinestring from all the ways that compose this relation
+    /// if `tolerance` is > 0, then it also join gaps in the ways into one linestring when possible
+    /// `tolerance` is in meters
     pub fn flatten_ways(&self, tolerance: f64) -> Result<Vec<Vec<Node>>, ()> {
         let ways = self.ways.iter().map(|w| w.nodes.clone()).collect();
         let passed = first_pass(&ways)?;
