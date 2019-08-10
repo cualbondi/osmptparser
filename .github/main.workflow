@@ -1,4 +1,4 @@
-workflow "CI" {
+workflow "onpush-CI" {
   on = "push"
   resolves = ["CI"]
 }
