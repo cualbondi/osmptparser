@@ -14,6 +14,12 @@ Time it
 cargo build --release --example main && /usr/bin/time -v target/release/examples/main ecuador-latest.osm.pbf
 ```
 
+## Run CI linter + recommendations + tests
+
+```
+cargo fmt -- --check && cargo clippy -- -D warnings -A clippy::ptr-arg && cargo test
+```
+
 ## Build pbf test file
 
 ```
