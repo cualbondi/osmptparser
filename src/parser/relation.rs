@@ -1,5 +1,5 @@
-use std::f64::INFINITY;
 use std::collections::HashMap;
+use std::f64::INFINITY;
 
 /// OSM node representation with all the relevant osm data (tags and id)
 #[derive(Clone, Debug)]
@@ -63,14 +63,9 @@ fn edgedistance(w1: &Vec<Node>, w2: &Vec<Node>) -> f64 {
         pointdistance(w1p2, w2p2),
         pointdistance(w1p1, w2p2),
         pointdistance(w1p2, w2p1),
-    ].iter().fold(-1f64, |a, b| {
-        if a < *b {
-            a
-        }
-        else {
-            *b
-        }
-    })
+    ]
+    .iter()
+    .fold(-1f64, |a, b| if a < *b { a } else { *b })
 }
 
 /// try to reverse directions in linestrings
@@ -143,7 +138,7 @@ fn sort_ways(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
         }
         sorted_ways.push(ws[minidx].clone());
         ws.remove(minidx);
-    };
+    }
     Ok(sorted_ways)
 }
 
@@ -154,14 +149,14 @@ fn dist_haversine(p1: &Node, p2: &Node) -> f64 {
     let lon2 = p2.lon;
     let lat2 = p2.lat;
 
-    let radius = 6371000_f64;  // meters
+    let radius = 6371000_f64; // meters
     let dlat = (lat2 - lat1).to_radians();
     let dlon = (lon2 - lon1).to_radians();
-    let a =
-        (dlat / 2_f64).sin() * (dlat / 2_f64).sin() +
-        lat1.to_radians().cos() * lat2.to_radians().cos() *
-        (dlon / 2_f64).sin() * (dlon / 2_f64).sin()
-    ;
+    let a = (dlat / 2_f64).sin() * (dlat / 2_f64).sin()
+        + lat1.to_radians().cos()
+            * lat2.to_radians().cos()
+            * (dlon / 2_f64).sin()
+            * (dlon / 2_f64).sin();
     let c = 2_f64 * a.sqrt().atan2((1_f64 - a).sqrt());
     radius * c
 }
@@ -171,7 +166,7 @@ fn dist_haversine(p1: &Node, p2: &Node) -> f64 {
 /// - This is not "expected". We are trying to fix the way now
 /// - This is not done by ST_LineMerge()
 /// - I'm not sure if this conserves the direction from first to last
-fn join_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> Result<Vec<Vec<Node>>, ()>  {
+fn join_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> Result<Vec<Vec<Node>>, ()> {
     let mut joined = Vec::new();
     joined.push(ways[0].clone());
     for w in ways[1..].to_vec() {
@@ -179,23 +174,19 @@ fn join_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> Result<Vec<Vec<Node>>, ()
         let joinedlast = joined[joined_len - 1].clone();
         if dist_haversine(&joinedlast[joinedlast.len() - 1], &w[0]) < tolerance {
             joined[joined_len - 1].extend(w);
-        }
-        else if dist_haversine(&joinedlast[joinedlast.len() - 1], &w[w.len() - 1]) < tolerance {
+        } else if dist_haversine(&joinedlast[joinedlast.len() - 1], &w[w.len() - 1]) < tolerance {
             let mut wrev = w.clone();
             wrev.reverse();
             joined[joined_len - 1].extend(wrev);
-        }
-        else if dist_haversine(&joinedlast[0], &w[0]) < tolerance {
+        } else if dist_haversine(&joinedlast[0], &w[0]) < tolerance {
             joined[joined_len - 1].reverse();
             joined[joined_len - 1].extend(w);
-        }
-        else if dist_haversine(&joinedlast[0], &w[w.len() - 1]) < tolerance {
+        } else if dist_haversine(&joinedlast[0], &w[w.len() - 1]) < tolerance {
             joined[joined_len - 1].reverse();
             let mut wrev = w.clone();
             wrev.reverse();
             joined[joined_len - 1].extend(wrev);
-        }
-        else {
+        } else {
             joined.push(w);
         }
     }

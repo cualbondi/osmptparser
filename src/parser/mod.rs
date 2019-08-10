@@ -1,18 +1,18 @@
 extern crate osm_pbf_iter;
 pub mod relation;
 
-use std::fs::File;
-use std::io::{BufReader};
-use std::sync::mpsc::{sync_channel};
-use std::thread;
-use std::sync::{Arc, RwLock};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::fs::File;
+use std::io::BufReader;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::collections::{HashSet, HashMap};
+use std::sync::mpsc::sync_channel;
+use std::sync::{Arc, RwLock};
+use std::thread;
 
-use osm_pbf_iter::{PrimitiveBlock, Blob, Primitive, RelationMemberType, BlobReader};
+use osm_pbf_iter::{Blob, BlobReader, Primitive, PrimitiveBlock, RelationMemberType};
 
-use relation::{Relation, Way, Node, PublicTransport};
+use relation::{Node, PublicTransport, Relation, Way};
 
 #[derive(Clone, Debug)]
 struct NodeData {
@@ -73,10 +73,8 @@ pub struct ParserRelationIterator {
 /// Main class, it parses the pbf file on new() and maintains an internal cache
 /// of relations / ways / nodes, to build on the fly PublicTransport representations
 impl Parser {
-
     /// creates internal cache by parsing the pbf file in the `pbf_filename` path, in parallel with `cpus` threads
     pub fn new(pbf_filename: &str, cpus: usize) -> Self {
-
         let mut relations = Vec::new() as Vec<RelationData>;
         let mut ways = HashMap::default() as HashMap<u64, WayData>;
         let mut nodes = HashMap::default() as HashMap<u64, NodeData>;
@@ -96,8 +94,16 @@ impl Parser {
                 thread::spawn(move || {
                     // relations_parser_worker(req_rx, res_tx);
                     // let routetypes_stops = ["train", "subway", "monorail", "tram", "light_rail"];
-                    let routetypes_all   = ["train", "subway", "monorail", "tram", "light_rail", "bus", "trolleybus"];
-                    let wayroles         = ["", "forward", "backward", "alternate"];
+                    let routetypes_all = [
+                        "train",
+                        "subway",
+                        "monorail",
+                        "tram",
+                        "light_rail",
+                        "bus",
+                        "trolleybus",
+                    ];
+                    let wayroles = ["", "forward", "backward", "alternate"];
 
                     let mut relations = Vec::new() as Vec<RelationData>;
                     let mut stop_ids = HashSet::default() as NodeIdsSet;
@@ -114,19 +120,29 @@ impl Parser {
                             match primitive {
                                 Primitive::Relation(relation) => {
                                     let routetag = relation.tags().find(|&kv| kv.0 == "route");
-                                    let routemastertag = relation.tags().find(|&kv| kv.0 == "route_master");
+                                    let routemastertag =
+                                        relation.tags().find(|&kv| kv.0 == "route_master");
                                     let nametag = relation.tags().find(|&kv| kv.0 == "name");
-                                    if routemastertag == None && routetag != None && routetypes_all.contains(&routetag.unwrap().1) && nametag != None {
+                                    if routemastertag == None
+                                        && routetag != None
+                                        && routetypes_all.contains(&routetag.unwrap().1)
+                                        && nametag != None
+                                    {
                                         // condicion para saber si esta relation es un public transport
                                         let mut rd = RelationData {
                                             id: relation.id,
-                                            tags: relation.tags().map(|t| (t.0.to_string(), t.1.to_string())).collect(),
+                                            tags: relation
+                                                .tags()
+                                                .map(|t| (t.0.to_string(), t.1.to_string()))
+                                                .collect(),
                                             ways: Vec::new(),
                                             stops: Vec::new(),
                                         };
                                         for member in relation.members() {
                                             // member = (role: &str, id: u64, type: RelationMemberType)
-                                            if member.2 == RelationMemberType::Way && wayroles.contains(&member.0) {
+                                            if member.2 == RelationMemberType::Way
+                                                && wayroles.contains(&member.0)
+                                            {
                                                 rd.ways.push(member.1);
                                                 way_ids.insert(member.1);
                                             }
@@ -137,23 +153,23 @@ impl Parser {
                                         }
                                         if rd.ways.len() > 0 {
                                             relations.push(rd);
-                                        }
-                                        else {
+                                        } else {
                                             // println!("WARNING: relation has no ways 'https://www.openstreetmap.org/relation/{:?}'", relation.id);
                                         }
                                     }
-                                },
+                                }
                                 _ => {}
                             }
                         }
                     }
 
-                    res_tx.send(MessageRelations {
-                        relations,
-                        stop_ids,
-                        way_ids,
-                    }).unwrap();
-
+                    res_tx
+                        .send(MessageRelations {
+                            relations,
+                            stop_ids,
+                            way_ids,
+                        })
+                        .unwrap();
                 });
             }
 
@@ -195,7 +211,6 @@ impl Parser {
                 workers.push((req_tx, res_rx));
                 let way_ids_local = way_ids.clone();
                 thread::spawn(move || {
-
                     let mut ways = HashMap::default() as HashMap<u64, WayData>;
                     let mut node_ids = HashSet::default() as NodeIdsSet;
                     let way_ids_read = way_ids_local.read().unwrap();
@@ -218,21 +233,21 @@ impl Parser {
                                             way.id,
                                             WayData {
                                                 id: way.id,
-                                                tags: way.tags().map(|t| (t.0.to_string(), t.1.to_string())).collect(),
+                                                tags: way
+                                                    .tags()
+                                                    .map(|t| (t.0.to_string(), t.1.to_string()))
+                                                    .collect(),
                                                 nodes: way.refs().map(|id| id as u64).collect(),
-                                            }
+                                            },
                                         );
                                     }
-                                },
+                                }
                                 _ => {}
                             }
                         }
                     }
 
-                    res_tx.send(MessageWays {
-                        ways,
-                        node_ids,
-                    }).unwrap();
+                    res_tx.send(MessageWays { ways, node_ids }).unwrap();
                 });
             }
 
@@ -258,7 +273,6 @@ impl Parser {
                 }
             } // write lock
         }
-
 
         /*
             pbf nodes collect
@@ -291,21 +305,23 @@ impl Parser {
                                             node.id,
                                             NodeData {
                                                 id: node.id,
-                                                tags: node.tags.into_iter().map(|t| (t.0.to_string(), t.1.to_string())).collect(),
+                                                tags: node
+                                                    .tags
+                                                    .into_iter()
+                                                    .map(|t| (t.0.to_string(), t.1.to_string()))
+                                                    .collect(),
                                                 lat: node.lat,
                                                 lon: node.lon,
-                                            }
+                                            },
                                         );
                                     }
-                                },
+                                }
                                 _ => {}
                             }
                         }
                     }
 
-                    res_tx.send(MessageNodes {
-                        nodes,
-                    }).unwrap();
+                    res_tx.send(MessageNodes { nodes }).unwrap();
                 });
             }
 
@@ -331,7 +347,6 @@ impl Parser {
         } // local vars block
         print!("END processing\n");
 
-
         Parser {
             relations,
             ways,
@@ -344,24 +359,26 @@ impl Parser {
     /// It works in parallel using the same amount of threads that were configured on new()
     pub fn get_public_transports(self) -> Vec<PublicTransport> {
         self.par_map(|r| {
-                let f = r.flatten_ways(150_f64).unwrap();
-                PublicTransport {
-                    id: r.id,
-                    tags: r.tags,
-                    stops: r.stops,
-                    geometry: f.iter().map(|v| v.iter().map(|n| (n.lon, n.lat)).collect()).collect(),
-                }
+            let f = r.flatten_ways(150_f64).unwrap();
+            PublicTransport {
+                id: r.id,
+                tags: r.tags,
+                stops: r.stops,
+                geometry: f
+                    .iter()
+                    .map(|v| v.iter().map(|n| (n.lon, n.lat)).collect())
+                    .collect(),
             }
-        )
+        })
     }
 
     /// Iterates in parallel through the cache of public transports and
     /// offers the possibility to further process them with the `func` function being executed in parallel
     /// It works in parallel using the same amount of threads that were configured on new()
     pub fn par_map<T, F>(self, func: F) -> Vec<T>
-        where
-            F: Fn(Relation) -> T + Sync + Send + Clone + 'static,
-            T: Send + 'static,
+    where
+        F: Fn(Relation) -> T + Sync + Send + Clone + 'static,
+        T: Send + 'static,
     {
         let cpus = self.cpus;
         let length = self.relations.len();
@@ -391,7 +408,7 @@ impl Parser {
                     res_tx.send(processed).unwrap();
                 }
             });
-        };
+        }
 
         // reduce / join all data from workers into one structure
         let mut relations = Vec::with_capacity(length);
@@ -403,14 +420,14 @@ impl Parser {
                     Ok(worker_data) => relations.push(worker_data),
                     Err(_) => errors = errors + 1,
                 };
-            };
-        };
+            }
+        }
         relations
     }
 
     /// Builds the Relation from the provided osm_id `id`
     pub fn get_relation_from_id(self, id: u64) -> Relation {
-        let relopt =  self.relations.iter().find(|rel| rel.id == id);
+        let relopt = self.relations.iter().find(|rel| rel.id == id);
         let rel = relopt.as_ref().unwrap();
         self.get_relation_from(rel)
     }
@@ -420,17 +437,17 @@ impl Parser {
         Relation {
             id: relation_data.id,
             tags: relation_data.tags.clone(),
-            ways: relation_data.ways.iter()
-                .filter(|wid|
-                    self.ways.contains_key(&wid)
-                )
+            ways: relation_data
+                .ways
+                .iter()
+                .filter(|wid| self.ways.contains_key(&wid))
                 .map(|wid| Way {
                     id: *wid,
                     tags: self.ways[&wid].tags.clone(),
-                    nodes: self.ways[&wid].nodes.iter()
-                        .filter(|nid|
-                            self.nodes.contains_key(&nid)
-                        )
+                    nodes: self.ways[&wid]
+                        .nodes
+                        .iter()
+                        .filter(|nid| self.nodes.contains_key(&nid))
                         .map(|nid| Node {
                             id: *nid,
                             tags: self.nodes[&nid].tags.clone(),
@@ -440,10 +457,10 @@ impl Parser {
                         .collect(),
                 })
                 .collect(),
-            stops: relation_data.stops.iter()
-                .filter(|nid|
-                    self.nodes.contains_key(&nid)
-                )
+            stops: relation_data
+                .stops
+                .iter()
+                .filter(|nid| self.nodes.contains_key(&nid))
                 .map(|nid| Node {
                     id: *nid,
                     tags: self.nodes[&nid].tags.clone(),
@@ -467,7 +484,6 @@ impl Parser {
             index: 0,
         }
     }
-
 }
 
 impl fmt::Debug for Parser {
@@ -478,16 +494,19 @@ impl fmt::Debug for Parser {
             count += 1;
             let ways_count = relation.ways.len();
             let stops_count = relation.stops.len();
-            let nodes_count = relation.ways
+            let nodes_count = relation
+                .ways
                 .iter()
-                .map(|wid| {
-                    match self.ways.get(wid) {
-                        Some(way) => way.nodes.len(),
-                        None => 0
-                    }
+                .map(|wid| match self.ways.get(wid) {
+                    Some(way) => way.nodes.len(),
+                    None => 0,
                 })
                 .fold(0, |a, b| a + b);
-            write!(f, "{:?}: ways {:?}, stops {:?}, nodes {:?}, {:?}\n", relation.id, ways_count, stops_count, nodes_count, relation.tags["name"])?;
+            write!(
+                f,
+                "{:?}: ways {:?}, stops {:?}, nodes {:?}, {:?}\n",
+                relation.id, ways_count, stops_count, nodes_count, relation.tags["name"]
+            )?;
         }
         write!(f, "\nFound {:?} relations\n", count)?;
         Ok(())
@@ -500,8 +519,7 @@ impl Iterator for ParserRelationIterator {
     fn next(&mut self) -> Option<Relation> {
         if self.index >= self.data.relations.len() {
             None
-        }
-        else {
+        } else {
             let relation = self.data.get_at(self.index);
             self.index += 1usize;
             Some(relation)

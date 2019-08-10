@@ -15,7 +15,7 @@ fn main() {
     let v1 = parser.get_public_transports();
     for _ in v1 {
         accum += 1;
-    };
+    }
 
     // OPTION2:
     // let v2 = parser.par_map(|r| r.flatten_ways(150_f64).unwrap());
