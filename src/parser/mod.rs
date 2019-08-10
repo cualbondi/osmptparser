@@ -55,6 +55,8 @@ struct MessageNodes {
     nodes: HashMap<u64, NodeData>,
 }
 
+/// Main class that parses a pbf file and maintains a cache of relations/ways/nodes
+/// then provides methods to access the public transports (PTv2) inside that (cached) file
 pub struct Parser {
     relations: Vec<RelationData>,
     ways: HashMap<u64, WayData>,
@@ -62,13 +64,17 @@ pub struct Parser {
     cpus: usize,
 }
 
-pub struct RelationIterator {
+/// Sequential iterator that returns a Relation on each turn
+pub struct ParserRelationIterator {
     index: usize,
     data: Parser,
 }
 
+/// Main class, it parses the pbf file on new() and maintains an internal cache
+/// of relations / ways / nodes, to build on the fly PublicTransport representations
 impl Parser {
 
+    /// creates internal cache by parsing the pbf file in the `pbf_filename` path, in parallel with `cpus` threads
     pub fn new(pbf_filename: &str, cpus: usize) -> Self {
 
         let mut relations = Vec::new() as Vec<RelationData>;
@@ -334,6 +340,8 @@ impl Parser {
         }
     }
 
+    /// Builds a vector in parallel with all the public transport ways normalized and "fixed".
+    /// It works in parallel using the same amount of threads that were configured on new()
     pub fn get_public_transports(self) -> Vec<PublicTransport> {
         self.par_map(|r| {
                 let f = r.flatten_ways(150_f64).unwrap();
@@ -347,6 +355,9 @@ impl Parser {
         )
     }
 
+    /// Iterates in parallel through the cache of public transports and
+    /// offers the possibility to further process them with the `func` function being executed in parallel
+    /// It works in parallel using the same amount of threads that were configured on new()
     pub fn par_map<T, F>(self, func: F) -> Vec<T>
         where
             F: Fn(Relation) -> T + Sync + Send + Clone + 'static,
@@ -397,12 +408,14 @@ impl Parser {
         relations
     }
 
+    /// Builds the Relation from the provided osm_id `id`
     fn get_relation_from_id(self, id: u64) -> Relation {
         let relopt =  self.relations.iter().find(|rel| rel.id == id);
         let rel = relopt.as_ref().unwrap();
         self.get_relation_from(rel)
     }
 
+    /// Builds the Relation providing relationdata internal cache
     fn get_relation_from(&self, relation_data: &RelationData) -> Relation {
         Relation {
             id: relation_data.id,
@@ -441,13 +454,15 @@ impl Parser {
         }
     }
 
+    /// Builds the Relation at position `index` in the internal cache
     pub fn get_at(&self, index: usize) -> Relation {
         let rel = &self.relations[index];
         self.get_relation_from(rel)
     }
 
-    pub fn iter(self) -> RelationIterator {
-        RelationIterator {
+    /// Returns a sequential iterator that returns a Relation on each turn
+    pub fn iter(self) -> ParserRelationIterator {
+        ParserRelationIterator {
             data: self,
             index: 0,
         }
@@ -479,7 +494,7 @@ impl fmt::Debug for Parser {
     }
 }
 
-impl Iterator for RelationIterator {
+impl Iterator for ParserRelationIterator {
     type Item = Relation;
 
     fn next(&mut self) -> Option<Relation> {
@@ -496,7 +511,7 @@ impl Iterator for RelationIterator {
 
 impl IntoIterator for Parser {
     type Item = Relation;
-    type IntoIter = RelationIterator;
+    type IntoIter = ParserRelationIterator;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
