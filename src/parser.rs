@@ -1,5 +1,4 @@
 extern crate osm_pbf_iter;
-extern crate fxhash;
 pub mod relation;
 
 use std::fs::File;
@@ -9,10 +8,9 @@ use std::thread;
 use std::sync::{Arc, RwLock};
 use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::{HashSet, HashMap};
 
 use osm_pbf_iter::{PrimitiveBlock, Blob, Primitive, RelationMemberType, BlobReader};
-use fxhash::FxHashSet;
-use fxhash::FxHashMap;
 
 use relation::{Relation, Way, Node, PublicTransport};
 
@@ -21,26 +19,26 @@ struct NodeData {
     id: u64,
     lat: f64,
     lon: f64,
-    tags: FxHashMap<String, String>,
+    tags: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
 struct WayData {
     id: u64,
-    tags: FxHashMap<String, String>,
+    tags: HashMap<String, String>,
     nodes: Vec<u64>,
 }
 
 #[derive(Clone, Debug)]
 struct RelationData {
     id: u64,
-    tags: FxHashMap<String, String>,
+    tags: HashMap<String, String>,
     ways: Vec<u64>,
     stops: Vec<u64>,
 }
 
-type WayIdsSet = FxHashSet<u64>;
-type NodeIdsSet = FxHashSet<u64>;
+type WayIdsSet = HashSet<u64>;
+type NodeIdsSet = HashSet<u64>;
 
 struct MessageRelations {
     relations: Vec<RelationData>,
@@ -49,18 +47,18 @@ struct MessageRelations {
 }
 
 struct MessageWays {
-    ways: FxHashMap<u64, WayData>,
+    ways: HashMap<u64, WayData>,
     node_ids: NodeIdsSet,
 }
 
 struct MessageNodes {
-    nodes: FxHashMap<u64, NodeData>,
+    nodes: HashMap<u64, NodeData>,
 }
 
 pub struct Parser {
     relations: Vec<RelationData>,
-    ways: FxHashMap<u64, WayData>,
-    nodes: FxHashMap<u64, NodeData>,
+    ways: HashMap<u64, WayData>,
+    nodes: HashMap<u64, NodeData>,
     cpus: usize,
 }
 
@@ -74,10 +72,10 @@ impl Parser {
     pub fn new(pbf_filename: &str, cpus: usize) -> Self {
 
         let mut relations = Vec::new() as Vec<RelationData>;
-        let mut ways = FxHashMap::default() as FxHashMap<u64, WayData>;
-        let mut nodes = FxHashMap::default() as FxHashMap<u64, NodeData>;
-        let way_ids = Arc::new(RwLock::new(FxHashSet::default() as WayIdsSet));
-        let node_ids = Arc::new(RwLock::new(FxHashSet::default() as NodeIdsSet));
+        let mut ways = HashMap::default() as HashMap<u64, WayData>;
+        let mut nodes = HashMap::default() as HashMap<u64, NodeData>;
+        let way_ids = Arc::new(RwLock::new(HashSet::default() as WayIdsSet));
+        let node_ids = Arc::new(RwLock::new(HashSet::default() as NodeIdsSet));
 
         /*
             pbf relations collect
@@ -96,8 +94,8 @@ impl Parser {
                     let wayroles         = ["", "forward", "backward", "alternate"];
 
                     let mut relations = Vec::new() as Vec<RelationData>;
-                    let mut stop_ids = FxHashSet::default() as NodeIdsSet;
-                    let mut way_ids = FxHashSet::default() as WayIdsSet;
+                    let mut stop_ids = HashSet::default() as NodeIdsSet;
+                    let mut way_ids = HashSet::default() as WayIdsSet;
                     loop {
                         let blob = match req_rx.recv() {
                             Ok(blob) => blob,
@@ -192,8 +190,8 @@ impl Parser {
                 let way_ids_local = way_ids.clone();
                 thread::spawn(move || {
 
-                    let mut ways = FxHashMap::default() as FxHashMap<u64, WayData>;
-                    let mut node_ids = FxHashSet::default() as NodeIdsSet;
+                    let mut ways = HashMap::default() as HashMap<u64, WayData>;
+                    let mut node_ids = HashSet::default() as NodeIdsSet;
                     let way_ids_read = way_ids_local.read().unwrap();
                     loop {
                         let blob = match req_rx.recv() {
@@ -270,7 +268,7 @@ impl Parser {
                 thread::spawn(move || {
                     // nodes_parser_worker(req_rx, res_tx);
                     let node_ids_read = node_ids_local.read().unwrap();
-                    let mut nodes = FxHashMap::default() as FxHashMap<u64, NodeData>;
+                    let mut nodes = HashMap::default() as HashMap<u64, NodeData>;
                     loop {
                         let blob = match req_rx.recv() {
                             Ok(blob) => blob,

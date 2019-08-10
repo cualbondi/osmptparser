@@ -6,8 +6,16 @@ edition = "2018"
 license = "AGPL-3.0-or-later"
 readme = "README.md"
 
+[lib]
+name = "osmptparser"
+crate-type = ["cdylib"]
+
 [dependencies]
 osm_pbf_iter = { git = "https://github.com/astro/rust-osm-pbf-iter", rev="a7849efd7ac33768f0e982879ca1c6acc3ff82a6" }
 # osm_pbf_iter = { path = "../rust-osm-pbf-iter" }
 num_cpus = "1.10"
-fxhash = "0.2.1"
+pyo3 = { version = "0.7.0", features = ["extension-module"] }
+
+[[example]]
+name = "main"
+path = "src/example.rs"

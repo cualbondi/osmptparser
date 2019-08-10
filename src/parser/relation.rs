@@ -1,11 +1,10 @@
-extern crate fxhash;
 use std::f64::INFINITY;
-use fxhash::FxHashMap;
+use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 pub struct Node {
     pub id: u64,
-    pub tags: FxHashMap<String, String>,
+    pub tags: HashMap<String, String>,
     pub lat: f64,
     pub lon: f64,
 }
@@ -20,14 +19,14 @@ impl Eq for Node {}
 #[derive(Clone, Debug)]
 pub struct Way {
     pub id: u64,
-    pub tags: FxHashMap<String, String>,
+    pub tags: HashMap<String, String>,
     pub nodes: Vec<Node>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Relation {
     pub id: u64,
-    pub tags: FxHashMap<String, String>,
+    pub tags: HashMap<String, String>,
     pub ways: Vec<Way>,
     pub stops: Vec<Node>,
 }
@@ -37,7 +36,7 @@ type LonLat = (f64, f64);
 #[derive(Clone, Debug)]
 pub struct PublicTransport {
     pub id: u64,
-    pub tags: FxHashMap<String, String>,
+    pub tags: HashMap<String, String>,
     pub stops: Vec<Node>,
     pub geometry: Vec<Vec<LonLat>>,
 }
