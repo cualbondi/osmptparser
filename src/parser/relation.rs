@@ -82,14 +82,14 @@ fn first_pass(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
         let mut prev_way = ordered_ways[ordered_ways.len() - 1].clone();
         // if its the first segment on the linestring,
         // try reversing it if it matches with the second
-        if ordered_ways[ordered_ways.len() - 1] == ways[i - 1] {
-            if way[0] == prev_way[0] || way[way.len() - 1] == prev_way[0] {
-                let mut rev = prev_way.clone();
-                rev.reverse();
-                let lasti = ordered_ways.len() - 1;
-                ordered_ways[lasti] = rev;
-                prev_way = ordered_ways[lasti].clone();
-            }
+        if ordered_ways[ordered_ways.len() - 1] == ways[i - 1]
+            && (way[0] == prev_way[0] || way[way.len() - 1] == prev_way[0])
+        {
+            let mut rev = prev_way.clone();
+            rev.reverse();
+            let lasti = ordered_ways.len() - 1;
+            ordered_ways[lasti] = rev;
+            prev_way = ordered_ways[lasti].clone();
         }
         // concat the second segment with the first one
         if prev_way[prev_way.len() - 1] == way[0] {
@@ -121,14 +121,14 @@ fn first_pass(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
 /// - Nevertheless I think this is also done by ST_LineMerge()
 /// TODO: this can probably be made with some std function like vec.sort(|nodesa, nodesb| edgedistance(nodesa, nodesb))
 fn sort_ways(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
-    let mut ws = ways.clone();
+    let mut ws = ways.to_owned();
     let mut sorted_ways = Vec::new();
     sorted_ways.push(ws[0].clone());
     ws = ws[1..].to_vec();
-    while ws.len() > 0 {
+    while !ws.is_empty() {
         let mut mindist = INFINITY;
         let mut minidx = 0usize;
-        for i in 0..ws.len() {
+        for (i, _) in ws.iter().enumerate() {
             let w = ws[i].clone();
             let dist = edgedistance(&w, &sorted_ways[sorted_ways.len() - 1]);
             if dist < mindist {
@@ -149,7 +149,7 @@ fn dist_haversine(p1: &Node, p2: &Node) -> f64 {
     let lon2 = p2.lon;
     let lat2 = p2.lat;
 
-    let radius = 6371000_f64; // meters
+    let radius = 6_371_000_f64; // meters
     let dlat = (lat2 - lat1).to_radians();
     let dlon = (lon2 - lon1).to_radians();
     let a = (dlat / 2_f64).sin() * (dlat / 2_f64).sin()

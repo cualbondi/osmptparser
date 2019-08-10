@@ -4,7 +4,7 @@ use osmptparser::Parser;
 fn main() {
     let pbf_filename_option = std::env::args().skip(1).next();
     if pbf_filename_option == None {
-        return print!("Expected filename\n");
+        return println!("Expected filename");
     }
     let pbf_filename = pbf_filename_option.unwrap();
 
@@ -20,5 +20,5 @@ fn main() {
     // OPTION2:
     // let v2 = parser.par_map(|r| r.flatten_ways(150_f64).unwrap());
 
-    print!("OKs = {:?}\n", accum);
+    println!("OKs = {:?}", accum);
 }
