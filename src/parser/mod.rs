@@ -1,3 +1,4 @@
+extern crate crossbeam;
 extern crate osm_pbf_iter;
 pub mod relation;
 
@@ -57,6 +58,7 @@ struct MessageNodes {
 
 /// Main class that parses a pbf file and maintains a cache of relations/ways/nodes
 /// then provides methods to access the public transports (PTv2) inside that (cached) file
+#[derive(Clone)]
 pub struct Parser {
     relations: Vec<RelationData>,
     ways: HashMap<u64, WayData>,
@@ -333,13 +335,14 @@ impl Parser {
 
     /// Builds a vector in parallel with all the public transport ways normalized and "fixed".
     /// It works in parallel using the same amount of threads that were configured on new()
-    pub fn get_public_transports(self) -> Vec<PublicTransport> {
-        self.par_map(|r| {
-            let f = r.flatten_ways(150_f64).unwrap();
+    pub fn get_public_transports(&self, gap: f64) -> Vec<PublicTransport> {
+        self.par_map(&move |r| {
+            // println!("{:?}",r.id);
+            let f = r.flatten_ways(gap).unwrap();
             PublicTransport {
                 id: r.id,
-                tags: r.tags,
-                stops: r.stops,
+                tags: r.tags.clone(),
+                stops: r.stops.clone(),
                 geometry: f
                     .iter()
                     .map(|v| v.iter().map(|n| (n.lon, n.lat)).collect())
@@ -351,54 +354,51 @@ impl Parser {
     /// Iterates in parallel through the cache of public transports and
     /// offers the possibility to further process them with the `func` function being executed in parallel
     /// It works in parallel using the same amount of threads that were configured on new()
-    pub fn par_map<T, F>(self, func: F) -> Vec<T>
+    pub fn par_map<R, F>(&self, func: &F) -> Vec<R>
     where
-        F: Fn(Relation) -> T + Sync + Send + Clone + 'static,
-        T: Send + 'static,
+        F: Fn(Relation) -> R + Sync + Send + Clone + 'static,
+        R: Send + 'static,
     {
         let cpus = self.cpus;
         let length = self.relations.len();
         let mut workers = Vec::with_capacity(cpus);
         let index = Arc::new(RwLock::new(AtomicUsize::new(0)));
-        let this = Arc::new(RwLock::new(self));
-        for _ in 0..cpus {
-            // let (req_tx, req_rx) = sync_channel(2);
-            let (res_tx, res_rx) = sync_channel(200);
-            workers.push(res_rx);
-            let index_local = index.clone();
-            let this_local = this.clone();
-            let func_local = func.clone();
-            thread::spawn(move || {
-                let this_read = this_local.read().unwrap();
-                loop {
+        crossbeam::scope(|s| {
+            for _ in 0..cpus {
+                let (res_tx, res_rx) = sync_channel(200);
+                workers.push(res_rx);
+                let index_local = index.clone();
+                s.spawn(move |_| loop {
                     let index;
                     {
                         let index_write = index_local.write().unwrap();
                         index = index_write.fetch_add(1, Ordering::SeqCst);
                     }
-                    if index >= this_read.relations.len() {
+                    let len = self.relations.len();
+                    if index >= len {
                         break;
                     }
-                    let relation = this_read.get_at(index);
-                    let processed = func_local(relation);
+                    let relation = self.get_at(index);
+                    let processed = func(relation);
                     res_tx.send(processed).unwrap();
-                }
-            });
-        }
-
-        // reduce / join all data from workers into one structure
-        let mut relations = Vec::with_capacity(length);
-        let mut errors = 0;
-        while errors < cpus {
-            errors = 0;
-            for res_rx in workers.iter() {
-                match res_rx.recv() {
-                    Ok(worker_data) => relations.push(worker_data),
-                    Err(_) => errors += 1,
-                };
+                });
             }
-        }
-        relations
+
+            // reduce / join all data from workers into one structure
+            let mut relations = Vec::with_capacity(length);
+            let mut errors = 0;
+            while errors < cpus {
+                errors = 0;
+                for res_rx in workers.iter() {
+                    match res_rx.recv() {
+                        Ok(worker_data) => relations.push(worker_data),
+                        Err(_) => errors += 1,
+                    };
+                }
+            }
+            relations
+        })
+        .unwrap()
     }
 
     /// Builds the Relation from the provided osm_id `id`

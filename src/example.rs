@@ -12,7 +12,7 @@ fn main() {
     let parser = Parser::new(&pbf_filename, nthreads);
 
     let mut accum = 0usize;
-    let v1 = parser.get_public_transports();
+    let v1 = parser.get_public_transports(150_f64);
     for _ in v1 {
         accum += 1;
     }
