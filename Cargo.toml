@@ -1,5 +1,6 @@
 [package]
 name = "osmptparser"
+description = "Openstreetmap Public Transport Parser"
 version = "1.0.0"
 authors = ["Julian Perelli <jperelli@gmail.com>"]
 edition = "2018"
