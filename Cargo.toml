@@ -12,7 +12,8 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 # osm_pbf_iter = { path = "../rust-osm-pbf-iter" }
-osm_pbf_iter = { git = "https://github.com/astro/rust-osm-pbf-iter", rev="a7849efd7ac33768f0e982879ca1c6acc3ff82a6" }
+# osm_pbf_iter = { git = "https://github.com/astro/rust-osm-pbf-iter", rev="a7849efd7ac33768f0e982879ca1c6acc3ff82a6" }
+osm_pbf_iter = "0.2.0"
 crossbeam = "0.7.2"
 
 [dev-dependencies]
