@@ -1,0 +1,17 @@
+name: Test
+
+on: [push]
+
+jobs:
+  test:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: icepuma/rust-action@master
+    - name: Format
+      run: cargo fmt -- --check
+    - name: Clippy
+      run: cargo clippy -- -D warnings -A clippy::ptr-arg
+    - name: Tests
+      run: cargo test --verbose
