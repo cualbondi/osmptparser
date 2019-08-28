@@ -1,5 +1,7 @@
 # Open Street Map Public Transport Parser
 
+[![Status](https://github.com/cualbondi/osmptparser/workflows/Test/badge.svg)](https://github.com/cualbondi/osmptparser/actions)
+
 ## Test how it works
 
 ```
