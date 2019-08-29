@@ -9,13 +9,16 @@ jobs:
 
     steps:
     - uses: actions/checkout@v1
-    - uses: cualbondi/rust-action@master
     - name: Format
+      uses: cualbondi/rust-action@master
       run: cargo fmt -- --check
     - name: Clippy
+      uses: cualbondi/rust-action@master
       run: cargo clippy -- -D warnings -A clippy::ptr-arg
     - name: Tests
+      uses: cualbondi/rust-action@master
       run: cargo test --verbose
     - name: codecov
+      uses: cualbondi/rust-action@master
       run: taskset -c 0 cargo tarpaulin --out Xml && bash <(curl -s https://codecov.io/bash)
 
