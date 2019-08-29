@@ -1,15 +1,8 @@
 use osmptparser::Parser;
 
 #[test]
-fn count_ok() {
-    let parser = Parser::new("tests/test.pbf", 2);
-    let len = parser.iter().count();
-    assert_eq!(2, len);
-}
-
-#[test]
 fn get_public_transports() {
-    let parser = Parser::new("tests/test.pbf", 2);
+    let parser = Parser::new("tests/test.pbf", 1);
     let ptsvec = parser.get_public_transports(1500_f64);
     let mut pts = ptsvec.iter().collect::<Vec<_>>();
     pts.sort_by(|a, b| a.id.cmp(&b.id));
