@@ -20,6 +20,6 @@ jobs:
       run: cargo test --verbose
     - name: codecov
       run:
-        taskset -c 0 cargo tarpaulin --out Xml
-        curl -s https://codecov.io/bash -o codecov.sh
-        bash codecov.sh
+        - taskset -c 0 cargo tarpaulin --out Xml
+        - curl -s https://codecov.io/bash -o codecov.sh
+        - bash codecov.sh
