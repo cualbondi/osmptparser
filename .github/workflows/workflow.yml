@@ -9,6 +9,7 @@ jobs:
 
     container:
       image: cualbondi/rust:1.37.0-0
+      options: --cpus 1 --security-opt seccomp=unconfined
 
     steps:
     - uses: actions/checkout@v1
