@@ -7,9 +7,12 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    container:
+      image: cualbondi/rust:1.37.0-0
+      options: --cpus 1 --security-opt seccomp=unconfined
+
     steps:
     - uses: actions/checkout@v1
-    - uses: cualbondi/rust-action@master
     - name: Format
       run: cargo fmt -- --check
     - name: Clippy
@@ -17,5 +20,6 @@ jobs:
     - name: Tests
       run: cargo test --verbose
     - name: codecov
-      run: taskset -c 0 cargo tarpaulin --out Xml && bash <(curl -s https://codecov.io/bash)
-
+      run: taskset -c 0 cargo tarpaulin --out Xml && curl -s https://codecov.io/bash -o codecov.sh && bash codecov.sh
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
