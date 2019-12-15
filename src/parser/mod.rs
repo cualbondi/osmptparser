@@ -1,6 +1,7 @@
 extern crate crossbeam;
 extern crate osm_pbf_iter;
 pub mod relation;
+pub mod parse_status;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -338,7 +339,7 @@ impl Parser {
     pub fn get_public_transports(&self, gap: f64) -> Vec<PublicTransport> {
         self.par_map(&move |r| {
             // println!("{:?}",r.id);
-            let f = r.flatten_ways(gap).unwrap();
+            let (f, s) = r.flatten_ways(gap).unwrap();
             PublicTransport {
                 id: r.id,
                 tags: r.tags.clone(),
@@ -347,6 +348,7 @@ impl Parser {
                     .iter()
                     .map(|v| v.iter().map(|n| (n.lon, n.lat)).collect())
                     .collect(),
+                parse_status: s
             }
         })
     }

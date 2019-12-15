@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::f64::INFINITY;
 
+use super::parse_status::ParseStatus;
+
 /// OSM node representation with all the relevant osm data (tags and id)
 #[derive(Clone, Debug)]
 pub struct Node {
@@ -47,6 +49,8 @@ pub struct PublicTransport {
     pub stops: Vec<Node>,
     /// geometry (linestring/multilinestring), best effort fixed
     pub geometry: Vec<Vec<LonLat>>,
+    /// parse status, info on workarounds applied when parsing to fix semi-broken osm routes
+    pub parse_status: ParseStatus,
 }
 
 fn pointdistance(p1: &Node, p2: &Node) -> f64 {
@@ -197,25 +201,25 @@ impl Relation {
     /// best effort get a linestring or multilinestring from all the ways that compose this relation
     /// if `tolerance` is > 0, then it also join gaps in the ways into one linestring when possible
     /// `tolerance` is in meters
-    pub fn flatten_ways(&self, tolerance: f64) -> Result<Vec<Vec<Node>>, ()> {
+    pub fn flatten_ways(&self, tolerance: f64) -> Result<(Vec<Vec<Node>>, ParseStatus), ()> {
         let ways = self.ways.iter().map(|w| w.nodes.clone()).collect();
         let passed = first_pass(&ways)?;
         if passed.len() == 1 {
-            return Ok(passed);
+            return Ok((passed, ParseStatus::ok()));
         }
         let sorted = sort_ways(&passed)?;
         let sorted_passed = first_pass(&sorted)?;
         if sorted_passed.len() == 1 {
-            return Ok(sorted_passed);
+            return Ok((sorted_passed, ParseStatus::new(101, "Sorted")));
         }
         let joined = join_ways(&passed, tolerance)?;
         if joined.len() == 1 {
-            return Ok(joined);
+            return Ok((joined, ParseStatus::new(102, "Joined")));
         }
         let joined_sorted = join_ways(&sorted, tolerance)?;
         if joined_sorted.len() == 1 {
-            return Ok(joined_sorted);
+            return Ok((joined_sorted, ParseStatus::new(103, "Joined Sorted")));
         }
-        Ok(Vec::new())
+        Ok((Vec::new(), ParseStatus::new(501, "Broken")))
     }
 }
