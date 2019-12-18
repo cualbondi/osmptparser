@@ -1,7 +1,7 @@
 extern crate crossbeam;
 extern crate osm_pbf_iter;
-pub mod relation;
 pub mod parse_status;
+pub mod relation;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -348,7 +348,7 @@ impl Parser {
                     .iter()
                     .map(|v| v.iter().map(|n| (n.lon, n.lat)).collect())
                     .collect(),
-                parse_status: s
+                parse_status: s,
             }
         })
     }
