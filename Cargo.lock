@@ -156,7 +156,7 @@ dependencies = [
 
 [[package]]
 name = "osmptparser"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "crossbeam 0.7.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "num_cpus 1.11.1 (registry+https://github.com/rust-lang/crates.io-index)",
