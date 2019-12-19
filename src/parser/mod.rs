@@ -127,34 +127,31 @@ impl Parser {
                                     && nametag != None
                                 {
                                     let mut info: HashMap<String, String> = HashMap::new();
-                                    match relation.info.clone() {
-                                        Some(info_data) => {
-                                            match info_data.version {
-                                                Some(version) => {info.insert("version".to_string(), version.to_string());},
-                                                _ => {},
-                                            };
-                                            match info_data.timestamp {
-                                                Some(timestamp) => {info.insert("timestamp".to_string(), timestamp.to_string());},
-                                                _ => {},
-                                            };
-                                            match info_data.changeset {
-                                                Some(changeset) => {info.insert("changeset".to_string(), changeset.to_string());},
-                                                _ => {},
-                                            };
-                                            match info_data.uid {
-                                                Some(uid) => {info.insert("uid".to_string(), uid.to_string());},
-                                                _ => {},
-                                            };
-                                            match info_data.user {
-                                                Some(user) => {info.insert("user".to_string(), user.to_string());},
-                                                _ => {},
-                                            };
-                                            match info_data.visible {
-                                                Some(visible) => {info.insert("visible".to_string(), visible.to_string());},
-                                                _ => {},
-                                            };
-                                        },
-                                        _ => {},
+                                    if let Some(info_data) = relation.info.clone() {
+                                        if let Some(version) = info_data.version {
+                                            info.insert("version".to_string(), version.to_string());
+                                        }
+                                        if let Some(timestamp) = info_data.timestamp {
+                                            info.insert(
+                                                "timestamp".to_string(),
+                                                timestamp.to_string(),
+                                            );
+                                        }
+                                        if let Some(changeset) = info_data.changeset {
+                                            info.insert(
+                                                "changeset".to_string(),
+                                                changeset.to_string(),
+                                            );
+                                        }
+                                        if let Some(uid) = info_data.uid {
+                                            info.insert("uid".to_string(), uid.to_string());
+                                        }
+                                        if let Some(user) = info_data.user {
+                                            info.insert("user".to_string(), user.to_string());
+                                        }
+                                        if let Some(visible) = info_data.visible {
+                                            info.insert("visible".to_string(), visible.to_string());
+                                        }
                                     }
                                     // condicion para saber si esta relation es un public transport
                                     let mut rd = RelationData {
