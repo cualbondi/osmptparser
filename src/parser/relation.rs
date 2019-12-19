@@ -32,6 +32,7 @@ pub struct Way {
 pub struct Relation {
     pub id: u64,
     pub tags: HashMap<String, String>,
+    pub info: HashMap<String, String>,
     pub ways: Vec<Way>,
     pub stops: Vec<Node>,
 }
@@ -45,6 +46,8 @@ pub struct PublicTransport {
     pub id: u64,
     /// osm tags of the public transport relation
     pub tags: HashMap<String, String>,
+    /// osm metadata of the public transport relation
+    pub info: HashMap<String, String>,
     /// stop nodes of the public transport relation with latlng and internal tags
     pub stops: Vec<Node>,
     /// geometry (linestring/multilinestring), best effort fixed

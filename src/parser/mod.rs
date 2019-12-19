@@ -35,6 +35,7 @@ struct WayData {
 struct RelationData {
     id: u64,
     tags: HashMap<String, String>,
+    info: HashMap<String, String>,
     ways: Vec<u64>,
     stops: Vec<u64>,
 }
@@ -125,6 +126,36 @@ impl Parser {
                                     && routetypes_all.contains(&routetag.unwrap().1)
                                     && nametag != None
                                 {
+                                    let mut info: HashMap<String, String> = HashMap::new();
+                                    match relation.info.clone() {
+                                        Some(info_data) => {
+                                            match info_data.version {
+                                                Some(version) => {info.insert("version".to_string(), version.to_string());},
+                                                _ => {},
+                                            };
+                                            match info_data.timestamp {
+                                                Some(timestamp) => {info.insert("timestamp".to_string(), timestamp.to_string());},
+                                                _ => {},
+                                            };
+                                            match info_data.changeset {
+                                                Some(changeset) => {info.insert("changeset".to_string(), changeset.to_string());},
+                                                _ => {},
+                                            };
+                                            match info_data.uid {
+                                                Some(uid) => {info.insert("uid".to_string(), uid.to_string());},
+                                                _ => {},
+                                            };
+                                            match info_data.user {
+                                                Some(user) => {info.insert("user".to_string(), user.to_string());},
+                                                _ => {},
+                                            };
+                                            match info_data.visible {
+                                                Some(visible) => {info.insert("visible".to_string(), visible.to_string());},
+                                                _ => {},
+                                            };
+                                        },
+                                        _ => {},
+                                    }
                                     // condicion para saber si esta relation es un public transport
                                     let mut rd = RelationData {
                                         id: relation.id,
@@ -132,6 +163,7 @@ impl Parser {
                                             .tags()
                                             .map(|t| (t.0.to_string(), t.1.to_string()))
                                             .collect(),
+                                        info,
                                         ways: Vec::new(),
                                         stops: Vec::new(),
                                     };
@@ -343,6 +375,7 @@ impl Parser {
             PublicTransport {
                 id: r.id,
                 tags: r.tags.clone(),
+                info: r.info.clone(),
                 stops: r.stops.clone(),
                 geometry: f
                     .iter()
@@ -415,6 +448,7 @@ impl Parser {
         Relation {
             id: relation_data.id,
             tags: relation_data.tags.clone(),
+            info: relation_data.info.clone(),
             ways: relation_data
                 .ways
                 .iter()
