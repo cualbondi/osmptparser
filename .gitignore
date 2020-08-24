@@ -1,6 +1,7 @@
 /target
 **/*.rs.bk
 /*.pbf
+/*.o5m
 .vscode
 .env
 /cobertura.xml
