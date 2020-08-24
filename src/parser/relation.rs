@@ -205,7 +205,10 @@ impl Relation {
     /// if `tolerance` is > 0, then it also join gaps in the ways into one linestring when possible
     /// `tolerance` is in meters
     pub fn flatten_ways(&self, tolerance: f64) -> Result<(Vec<Vec<Node>>, ParseStatus), ()> {
-        let ways = self.ways.iter().map(|w| w.nodes.clone()).collect();
+        let ways: Vec<Vec<Node>> = self.ways.iter().map(|w| w.nodes.clone()).collect();
+        if ways.is_empty() {
+            return Ok((Vec::new(), ParseStatus::new(501, "Broken")));
+        }
         let passed = first_pass(&ways)?;
         if passed.len() == 1 {
             return Ok((passed, ParseStatus::ok()));

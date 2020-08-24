@@ -373,7 +373,7 @@ impl Parser {
                 id: r.id,
                 tags: r.tags.clone(),
                 info: r.info.clone(),
-                stops: r.stops.clone(),
+                stops: r.stops,
                 geometry: f
                     .iter()
                     .map(|v| v.iter().map(|n| (n.lon, n.lat)).collect())

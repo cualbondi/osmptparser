@@ -1,3 +1,9 @@
+## v1.2.2
+
+Maintenance fix
+
+ - Fixed issue when osm data is buggy. Relation without ways
+
 ## v1.2.0
 
 Added info HashMap to expose public transport relation metadata
