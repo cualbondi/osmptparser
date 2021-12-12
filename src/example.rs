@@ -9,10 +9,11 @@ fn main() {
     let pbf_filename = pbf_filename_option.unwrap();
 
     let nthreads = num_cpus::get();
-    let parser = Parser::new(&pbf_filename, nthreads);
+    let parser = Parser::new(&pbf_filename, nthreads, "natural=beach".to_string());
+    // let parser = Parser::new_aa(&pbf_filename, nthreads);
 
     let mut accum = 0usize;
-    let v1 = parser.get_public_transports(150_f64);
+    let v1 = parser.get_areas(150_f64);
     for _ in v1 {
         accum += 1;
     }

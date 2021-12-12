@@ -1,3 +1,20 @@
+## v2.0.0
+
+Added generic filtering
+
+ - Added new CLI
+ - Added parameter to filter with any key=value of osm tags
+ - Added: Parser::get_areas(tolerance)
+ - Modified: struct relation::AdministrativeArea to relation::Area
+
+## v1.3.0 (unreleased)
+
+Added Administrative areas parsing
+
+ - Added: struct relation::AdministrativeArea
+ - Added: Parser::get_administrative_areas()
+ - Added: Parser::new_aa()
+
 ## v1.2.2
 
 Maintenance fix

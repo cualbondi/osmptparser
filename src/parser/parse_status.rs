@@ -1,5 +1,5 @@
 /// Public transport simple model
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ParseStatus {
     /// status code
     pub code: u64,

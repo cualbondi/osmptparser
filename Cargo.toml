@@ -1,7 +1,7 @@
 [package]
 name = "osmptparser"
 description = "Openstreetmap Public Transport Parser"
-version = "1.2.2"
+version = "2.0.0"
 authors = ["Julian Perelli <jperelli@gmail.com>"]
 edition = "2018"
 license = "AGPL-3.0-or-later"
@@ -15,11 +15,15 @@ crate-type = ["rlib", "cdylib"]
 # osm_pbf_iter = { path = "../rust-osm-pbf-iter" }
 # osm_pbf_iter = { git = "https://github.com/astro/rust-osm-pbf-iter", rev="a7849efd7ac33768f0e982879ca1c6acc3ff82a6" }
 osm_pbf_iter = "0.2.0"
-crossbeam = "0.7.3"
-
-[dev-dependencies]
-num_cpus = "1.10.1"
+crossbeam = "0.8.1"
+num_cpus = "1.13.0"
+structopt = "0.3.25"
+serde_json = "1.0.59"
 
 [[example]]
 name = "main"
 path = "src/example.rs"
+
+[[bin]]
+name = "osmptparser"
+path = "src/bin.rs"

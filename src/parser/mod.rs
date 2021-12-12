@@ -1,5 +1,6 @@
 extern crate crossbeam;
 extern crate osm_pbf_iter;
+use std::io::{self, Write};
 pub mod parse_status;
 pub mod relation;
 
@@ -14,11 +15,11 @@ use std::thread;
 
 use osm_pbf_iter::{Blob, BlobReader, Primitive, PrimitiveBlock, RelationMemberType};
 
-use relation::{Node, PublicTransport, Relation, Way};
+use relation::{Area, Node, PublicTransport, Relation, Way};
 
 #[derive(Clone, Debug)]
 struct NodeData {
-    id: u64,
+    // id: u64,
     lat: f64,
     lon: f64,
     tags: HashMap<String, String>,
@@ -28,6 +29,7 @@ struct NodeData {
 struct WayData {
     id: u64,
     tags: HashMap<String, String>,
+    info: HashMap<String, String>,
     nodes: Vec<u64>,
 }
 
@@ -50,7 +52,8 @@ struct MessageRelations {
 }
 
 struct MessageWays {
-    ways: HashMap<u64, WayData>,
+    ways: Vec<WayData>,
+    relations_ways: HashMap<u64, WayData>,
     node_ids: NodeIdsSet,
 }
 
@@ -63,7 +66,8 @@ struct MessageNodes {
 #[derive(Clone)]
 pub struct Parser {
     relations: Vec<RelationData>,
-    ways: HashMap<u64, WayData>,
+    relations_ways: HashMap<u64, WayData>,
+    ways: Vec<WayData>,
     nodes: HashMap<u64, NodeData>,
     cpus: usize,
 }
@@ -77,55 +81,108 @@ pub struct ParserRelationIterator {
 /// Main class, it parses the pbf file on new() and maintains an internal cache
 /// of relations / ways / nodes, to build on the fly PublicTransport representations
 impl Parser {
-    /// creates internal cache by parsing the pbf file in the `pbf_filename` path, in parallel with `cpus` threads
-    pub fn new(pbf_filename: &str, cpus: usize) -> Self {
+    /// generic check using a filter of tag_conditions with the following format
+    /// "tag_key"
+    /// "tag_key=tag_value"
+    /// "tag_key=tag_value,tag_value2&tag_key2=tag_value3"
+    fn filter_relation(relation: &osm_pbf_iter::Relation, conditions: &String) -> bool {
+        for condition in conditions.split('&') {
+            let mut condition_split = condition.split('=');
+            let condition_key = condition_split.next().unwrap().to_string();
+            let condition_value = condition_split.next();
+            let tag = relation.tags().find(|&kv| kv.0 == condition_key);
+            if tag == None {
+                return false;
+            } else if condition_value != None {
+                let condition_value_string = condition_value.unwrap().to_string();
+                if tag.unwrap().1 != condition_value_string {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// generic check using a filter of tag_conditions with the following format
+    /// "tag_key"
+    /// "tag_key=tag_value"
+    /// "tag_key=tag_value,tag_value2&tag_key2=tag_value3"
+    fn filter_way(relation: &osm_pbf_iter::Way, conditions: &String) -> bool {
+        for condition in conditions.split('&') {
+            let mut condition_split = condition.split('=');
+            let condition_key = condition_split.next().unwrap().to_string();
+            let condition_value = condition_split.next();
+            let tag = relation.tags().find(|&kv| kv.0 == condition_key);
+            if tag == None {
+                return false;
+            } else if condition_value != None {
+                let condition_value_string = condition_value.unwrap().to_string();
+                if tag.unwrap().1 != condition_value_string {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// creates internal cache by parsing public transport v2 from pbf file in the `pbf_filename` path, in parallel with `cpus` threads
+    pub fn new_ptv2(pbf_filename: &str, cpus: usize) -> Self {
+        Self::new(
+            pbf_filename,
+            cpus,
+            "name&route_master&route=bus,tram,train,subway,light_rail,monorail,trolleybus"
+                .to_string(),
+        )
+    }
+
+    /// creates internal cache by parsing administrative areas from pbf file in the `pbf_filename` path, in parallel with `cpus` threads
+    pub fn new_aa(pbf_filename: &str, cpus: usize) -> Self {
+        Self::new(
+            pbf_filename,
+            cpus,
+            "name&admin_level&boundary=administrative".to_string(),
+        )
+    }
+
+    /// creates internal cache by parsing the pbf file in the `pbf_filename` path, in parallel with `cpus` threads, filtering by tags in `filters`
+    /// filters examples:
+    /// "tag_key"
+    ///     the relation must have the tag "tag_key"
+    /// "tag_key=tag_value"
+    ///     the relation must have the tag "tag_key" with value "tag_value"
+    /// "tag_key=tag_value,tag_value2&tag_key2=tag_value3"
+    ///     the relation must have the tag "tag_key" with value "tag_value" or "tag_value2" and the tag "tag_key2" with value "tag_value3"
+    pub fn new(pbf_filename: &str, cpus: usize, filters: String) -> Self {
         let mut relations = Vec::new() as Vec<RelationData>;
-        let mut ways = HashMap::default() as HashMap<u64, WayData>;
+        let mut ways = Vec::new() as Vec<WayData>;
+        let mut relations_ways = HashMap::default() as HashMap<u64, WayData>;
         let mut nodes = HashMap::default() as HashMap<u64, NodeData>;
         let way_ids = Arc::new(RwLock::new(HashSet::default() as WayIdsSet));
         let node_ids = Arc::new(RwLock::new(HashSet::default() as NodeIdsSet));
-
+        let filters_arc = Arc::new(filters);
         /*
             pbf relations collect
         */
         {
-            println!("START relations map");
+            eprint!("START Relations map, ");
+            io::stderr().flush().unwrap();
             let mut workers = Vec::with_capacity(cpus);
             for _ in 0..cpus {
                 let (req_tx, req_rx) = sync_channel(2);
                 let (res_tx, res_rx) = sync_channel(0);
                 workers.push((req_tx, res_rx));
+                let filters_local = filters_arc.clone();
                 thread::spawn(move || {
-                    // relations_parser_worker(req_rx, res_tx);
-                    // let routetypes_stops = ["train", "subway", "monorail", "tram", "light_rail"];
-                    let routetypes_all = [
-                        "train",
-                        "subway",
-                        "monorail",
-                        "tram",
-                        "light_rail",
-                        "bus",
-                        "trolleybus",
-                    ];
-                    let wayroles = ["", "forward", "backward", "alternate"];
-
                     let mut relations = Vec::new() as Vec<RelationData>;
                     let mut stop_ids = HashSet::default() as NodeIdsSet;
                     let mut way_ids = HashSet::default() as WayIdsSet;
+
                     while let Ok(blob) = req_rx.recv() {
                         let data = (blob as Blob).into_data();
                         let primitive_block = PrimitiveBlock::parse(&data);
                         for primitive in primitive_block.primitives() {
                             if let Primitive::Relation(relation) = primitive {
-                                let routetag = relation.tags().find(|&kv| kv.0 == "route");
-                                let routemastertag =
-                                    relation.tags().find(|&kv| kv.0 == "route_master");
-                                let nametag = relation.tags().find(|&kv| kv.0 == "name");
-                                if routemastertag == None
-                                    && routetag != None
-                                    && routetypes_all.contains(&routetag.unwrap().1)
-                                    && nametag != None
-                                {
+                                if Self::filter_relation(&relation, filters_local.as_ref()) {
                                     let mut info: HashMap<String, String> = HashMap::new();
                                     if let Some(info_data) = relation.info.clone() {
                                         if let Some(version) = info_data.version {
@@ -166,9 +223,7 @@ impl Parser {
                                     };
                                     for member in relation.members() {
                                         // member = (role: &str, id: u64, type: RelationMemberType)
-                                        if member.2 == RelationMemberType::Way
-                                            && wayroles.contains(&member.0)
-                                        {
+                                        if member.2 == RelationMemberType::Way {
                                             rd.ways.push(member.1);
                                             way_ids.insert(member.1);
                                         }
@@ -207,7 +262,8 @@ impl Parser {
                 req_tx.send(blob).unwrap();
             }
 
-            println!("START relations reduce");
+            eprint!("reduce, ");
+            io::stderr().flush().unwrap();
             // reduce / join all data from workers into one structure
             {
                 // write lock
@@ -221,21 +277,25 @@ impl Parser {
                     way_ids_write.extend(worker_data.way_ids);
                 }
             } // write lock
+            eprintln!("found {}", relations.len());
         }
 
         /*
             pbf ways collect
         */
         {
-            println!("START ways map");
+            eprint!("START Ways map, ");
+            io::stderr().flush().unwrap();
             let mut workers = Vec::with_capacity(cpus);
             for _ in 0..cpus {
                 let (req_tx, req_rx) = sync_channel(2);
                 let (res_tx, res_rx) = sync_channel(0);
                 workers.push((req_tx, res_rx));
                 let way_ids_local = way_ids.clone();
+                let filters_local = filters_arc.clone();
                 thread::spawn(move || {
-                    let mut ways = HashMap::default() as HashMap<u64, WayData>;
+                    let mut ways = Vec::new() as Vec<WayData>;
+                    let mut relations_ways = HashMap::default() as HashMap<u64, WayData>;
                     let mut node_ids = HashSet::default() as NodeIdsSet;
                     let way_ids_read = way_ids_local.read().unwrap();
                     while let Ok(blob) = req_rx.recv() {
@@ -243,11 +303,12 @@ impl Parser {
                         let primitive_block = PrimitiveBlock::parse(&blob);
                         for primitive in primitive_block.primitives() {
                             if let Primitive::Way(way) = primitive {
+                                // relations_ways, collect ways that are part of relations previously found
                                 if way_ids_read.contains(&way.id) {
                                     for node in way.refs() {
                                         node_ids.insert(node as u64);
                                     }
-                                    ways.insert(
+                                    relations_ways.insert(
                                         way.id,
                                         WayData {
                                             id: way.id,
@@ -255,15 +316,69 @@ impl Parser {
                                                 .tags()
                                                 .map(|t| (t.0.to_string(), t.1.to_string()))
                                                 .collect(),
+                                            info: HashMap::new(),
                                             nodes: way.refs().map(|id| id as u64).collect(),
                                         },
                                     );
+                                }
+                                // ways, collect ways that are not part of relations previously found but conform to filters
+                                if Self::filter_way(&way, filters_local.as_ref()) {
+                                    let mut info: HashMap<String, String> = HashMap::new();
+                                    if let Some(info_data) = way.info.clone() {
+                                        if let Some(version) = info_data.version {
+                                            info.insert("version".to_string(), version.to_string());
+                                        }
+                                        if let Some(timestamp) = info_data.timestamp {
+                                            info.insert(
+                                                "timestamp".to_string(),
+                                                timestamp.to_string(),
+                                            );
+                                        }
+                                        if let Some(changeset) = info_data.changeset {
+                                            info.insert(
+                                                "changeset".to_string(),
+                                                changeset.to_string(),
+                                            );
+                                        }
+                                        if let Some(uid) = info_data.uid {
+                                            info.insert("uid".to_string(), uid.to_string());
+                                        }
+                                        if let Some(user) = info_data.user {
+                                            info.insert("user".to_string(), user.to_string());
+                                        }
+                                        if let Some(visible) = info_data.visible {
+                                            info.insert("visible".to_string(), visible.to_string());
+                                        }
+                                    }
+                                    let wd = WayData {
+                                        id: way.id,
+                                        tags: way
+                                            .tags()
+                                            .map(|t| (t.0.to_string(), t.1.to_string()))
+                                            .collect(),
+                                        info,
+                                        nodes: way.refs().map(|id| id as u64).collect(),
+                                    };
+                                    if !wd.nodes.is_empty() {
+                                        for node in way.refs() {
+                                            node_ids.insert(node as u64);
+                                        }
+                                        ways.push(wd);
+                                    } else {
+                                        // println!("WARNING: way has no nodes 'https://www.openstreetmap.org/way/{:?}'", way.id);
+                                    }
                                 }
                             }
                         }
                     }
 
-                    res_tx.send(MessageWays { ways, node_ids }).unwrap();
+                    res_tx
+                        .send(MessageWays {
+                            ways,
+                            relations_ways,
+                            node_ids,
+                        })
+                        .unwrap();
                 });
             }
 
@@ -277,7 +392,8 @@ impl Parser {
                 req_tx.send(blob).unwrap();
             }
 
-            println!("START ways reduce");
+            eprint!("reduce, ");
+            io::stderr().flush().unwrap();
             // reduce / join all data from workers into one structure
             {
                 let mut node_ids_write = node_ids.write().unwrap();
@@ -285,16 +401,23 @@ impl Parser {
                     drop(req_tx);
                     let worker_data = res_rx.recv().unwrap();
                     ways.extend(worker_data.ways);
+                    relations_ways.extend(worker_data.relations_ways);
                     node_ids_write.extend(worker_data.node_ids);
                 }
             } // write lock
+            eprintln!(
+                "found {} for relations +{} new",
+                relations_ways.len(),
+                ways.len()
+            );
         }
 
         /*
             pbf nodes collect
         */
         {
-            println!("START nodes map");
+            eprint!("START Nodes map, ");
+            io::stderr().flush().unwrap();
             let mut workers = Vec::with_capacity(cpus);
             for _ in 0..cpus {
                 let (req_tx, req_rx) = sync_channel(2);
@@ -314,7 +437,7 @@ impl Parser {
                                     nodes.insert(
                                         node.id,
                                         NodeData {
-                                            id: node.id,
+                                            // id: node.id,
                                             tags: node
                                                 .tags
                                                 .into_iter()
@@ -343,7 +466,8 @@ impl Parser {
                 req_tx.send(blob).unwrap();
             }
 
-            println!("START nodes reduce");
+            eprint!("reduce, ");
+            io::stderr().flush().unwrap();
             // reduce / join all data from workers into one structure
             {
                 for (req_tx, res_rx) in workers.into_iter() {
@@ -353,10 +477,11 @@ impl Parser {
                 }
             } // write lock
         } // local vars block
-        println!("END processing");
+        eprintln!("found {}", nodes.len());
 
         Parser {
             relations,
+            relations_ways,
             ways,
             nodes,
             cpus,
@@ -368,7 +493,7 @@ impl Parser {
     pub fn get_public_transports(&self, gap: f64) -> Vec<PublicTransport> {
         self.par_map(&move |r| {
             // println!("{:?}",r.id);
-            let (f, s) = r.flatten_ways(gap).unwrap();
+            let (f, s) = r.flatten_ways(gap, false).unwrap();
             PublicTransport {
                 id: r.id,
                 tags: r.tags.clone(),
@@ -406,11 +531,10 @@ impl Parser {
                         let index_write = index_local.write().unwrap();
                         index = index_write.fetch_add(1, Ordering::SeqCst);
                     }
-                    let len = self.relations.len();
-                    if index >= len {
+                    if index >= length {
                         break;
                     }
-                    let relation = self.get_at(index);
+                    let relation = self.get_relation_at(index);
                     let processed = func(relation);
                     res_tx.send(processed).unwrap();
                 });
@@ -433,6 +557,82 @@ impl Parser {
         .unwrap()
     }
 
+    /// Builds a vector in parallel with all the areas normalized and "fixed".
+    /// It works in parallel using the same amount of threads that were configured on new()
+    pub fn get_areas(&self, gap: f64) -> Vec<Area> {
+        let relations_ways = self.par_map(&move |r| {
+            let (f, s) = r.flatten_ways(gap, true).unwrap();
+            Area {
+                id: r.id,
+                tags: r.tags,
+                info: r.info,
+                geometry: f
+                    .iter()
+                    .map(|v| v.iter().map(|n| (n.lon, n.lat)).collect())
+                    .collect(),
+                parse_status: s,
+            }
+        });
+
+        // iterates over all ways (par_map_ways) and creates a vector of areas
+        let cpus = self.cpus;
+        let length = self.ways.len();
+        let mut workers = Vec::with_capacity(cpus);
+        let index = Arc::new(RwLock::new(AtomicUsize::new(0)));
+        let areas_ways = crossbeam::scope(|s| {
+            for _ in 0..cpus {
+                let (res_tx, res_rx) = sync_channel(200);
+                workers.push(res_rx);
+                let index_local = index.clone();
+                s.spawn(move |_| loop {
+                    let index;
+                    {
+                        let index_write = index_local.write().unwrap();
+                        index = index_write.fetch_add(1, Ordering::SeqCst);
+                    }
+                    if index >= length {
+                        break;
+                    }
+                    let way = self.get_way_at(index);
+                    let (f, s) = way.flatten_ways(gap, true).unwrap();
+                    let area = Area {
+                        id: way.id,
+                        tags: way.tags,
+                        info: way.info,
+                        geometry: f
+                            .iter()
+                            .map(|v| v.iter().map(|n| (n.lon, n.lat)).collect())
+                            .collect(),
+                        parse_status: s,
+                    };
+                    println!("{:?}", area);
+                    res_tx.send(area).unwrap();
+                });
+            }
+
+            // reduce / join all data from workers into one structure
+            let mut ways = Vec::with_capacity(length);
+            let mut errors = 0;
+            while errors < cpus {
+                errors = 0;
+                for res_rx in workers.iter() {
+                    match res_rx.recv() {
+                        Ok(worker_data) => ways.push(worker_data),
+                        Err(_) => errors += 1,
+                    };
+                }
+            }
+            ways
+        })
+        .unwrap();
+
+        // returns relations_ways + areas_ways
+        relations_ways
+            .into_iter()
+            .chain(areas_ways.into_iter())
+            .collect()
+    }
+
     /// Builds the Relation from the provided osm_id `id`
     pub fn get_relation_from_id(self, id: u64) -> Relation {
         let relopt = self.relations.iter().find(|rel| rel.id == id);
@@ -449,19 +649,20 @@ impl Parser {
             ways: relation_data
                 .ways
                 .iter()
-                .filter(|wid| self.ways.contains_key(&wid))
+                .filter(|wid| self.relations_ways.contains_key(wid))
                 .map(|wid| Way {
                     id: *wid,
-                    tags: self.ways[&wid].tags.clone(),
-                    nodes: self.ways[&wid]
+                    tags: self.relations_ways[wid].tags.clone(),
+                    info: self.relations_ways[wid].info.clone(),
+                    nodes: self.relations_ways[wid]
                         .nodes
                         .iter()
-                        .filter(|nid| self.nodes.contains_key(&nid))
+                        .filter(|nid| self.nodes.contains_key(nid))
                         .map(|nid| Node {
                             id: *nid,
-                            tags: self.nodes[&nid].tags.clone(),
-                            lat: self.nodes[&nid].lat,
-                            lon: self.nodes[&nid].lon,
+                            tags: self.nodes[nid].tags.clone(),
+                            lat: self.nodes[nid].lat,
+                            lon: self.nodes[nid].lon,
                         })
                         .collect(),
                 })
@@ -469,21 +670,47 @@ impl Parser {
             stops: relation_data
                 .stops
                 .iter()
-                .filter(|nid| self.nodes.contains_key(&nid))
+                .filter(|nid| self.nodes.contains_key(nid))
                 .map(|nid| Node {
                     id: *nid,
-                    tags: self.nodes[&nid].tags.clone(),
-                    lat: self.nodes[&nid].lat,
-                    lon: self.nodes[&nid].lon,
+                    tags: self.nodes[nid].tags.clone(),
+                    lat: self.nodes[nid].lat,
+                    lon: self.nodes[nid].lon,
+                })
+                .collect(),
+        }
+    }
+
+    /// Builds the Way providing waydata internal cache
+    fn get_way_from(&self, way_data: &WayData) -> Way {
+        Way {
+            id: way_data.id,
+            tags: way_data.tags.clone(),
+            info: way_data.info.clone(),
+            nodes: way_data
+                .nodes
+                .iter()
+                .filter(|nid| self.nodes.contains_key(nid))
+                .map(|nid| Node {
+                    id: *nid,
+                    tags: self.nodes[nid].tags.clone(),
+                    lat: self.nodes[nid].lat,
+                    lon: self.nodes[nid].lon,
                 })
                 .collect(),
         }
     }
 
     /// Builds the Relation at position `index` in the internal cache
-    pub fn get_at(&self, index: usize) -> Relation {
+    pub fn get_relation_at(&self, index: usize) -> Relation {
         let rel = &self.relations[index];
         self.get_relation_from(rel)
+    }
+
+    /// Builds the Way at position `index` in the internal cache
+    pub fn get_way_at(&self, index: usize) -> Way {
+        let way = &self.ways[index];
+        self.get_way_from(way)
     }
 
     /// Returns a sequential iterator that returns a Relation on each turn
@@ -506,7 +733,7 @@ impl fmt::Debug for Parser {
             let nodes_count: usize = relation
                 .ways
                 .iter()
-                .map(|wid| match self.ways.get(wid) {
+                .map(|wid| match self.relations_ways.get(wid) {
                     Some(way) => way.nodes.len(),
                     None => 0,
                 })
@@ -529,7 +756,7 @@ impl Iterator for ParserRelationIterator {
         if self.index >= self.data.relations.len() {
             None
         } else {
-            let relation = self.data.get_at(self.index);
+            let relation = self.data.get_relation_at(self.index);
             self.index += 1usize;
             Some(relation)
         }

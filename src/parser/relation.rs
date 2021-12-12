@@ -1,7 +1,18 @@
+use serde_json::json;
 use std::collections::HashMap;
 use std::f64::INFINITY;
+use std::fmt;
 
 use super::parse_status::ParseStatus;
+
+#[derive(Debug)]
+pub struct ParseError;
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Error Parsing")
+    }
+}
+impl std::error::Error for ParseError {}
 
 /// OSM node representation with all the relevant osm data (tags and id)
 #[derive(Clone, Debug)]
@@ -24,6 +35,7 @@ impl Eq for Node {}
 pub struct Way {
     pub id: u64,
     pub tags: HashMap<String, String>,
+    pub info: HashMap<String, String>,
     pub nodes: Vec<Node>,
 }
 
@@ -52,7 +64,22 @@ pub struct PublicTransport {
     pub stops: Vec<Node>,
     /// geometry (linestring/multilinestring), best effort fixed
     pub geometry: Vec<Vec<LonLat>>,
-    /// parse status, info on workarounds applied when parsing to fix semi-broken osm routes
+    /// parse status, info on workarounds applied when parsing to fix semi-broken osm route
+    pub parse_status: ParseStatus,
+}
+
+/// Area simple model
+#[derive(Clone, Debug)]
+pub struct Area {
+    /// osm id
+    pub id: u64,
+    /// osm tags of the Area
+    pub tags: HashMap<String, String>,
+    /// osm metadata of the Area
+    pub info: HashMap<String, String>,
+    /// geometry (polygon/multipolygon), best effort fixed
+    pub geometry: Vec<Vec<LonLat>>,
+    /// parse status, info on workarounds applied when parsing to fix semi-broken osm area
     pub parse_status: ParseStatus,
 }
 
@@ -82,8 +109,7 @@ fn edgedistance(w1: &Vec<Node>, w2: &Vec<Node>) -> f64 {
 fn first_pass(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
     // try to flatten by joining most ways as possible
     let n = ways.len();
-    let mut ordered_ways = Vec::new();
-    ordered_ways.push(ways[0].clone());
+    let mut ordered_ways = vec![ways[0].clone()];
     for i in 1..n {
         let way = ways[i].clone();
         let mut prev_way = ordered_ways[ordered_ways.len() - 1].clone();
@@ -129,8 +155,7 @@ fn first_pass(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
 /// TODO: this can probably be made with some std function like vec.sort(|nodesa, nodesb| edgedistance(nodesa, nodesb))
 fn sort_ways(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
     let mut ws = ways.to_owned();
-    let mut sorted_ways = Vec::new();
-    sorted_ways.push(ws[0].clone());
+    let mut sorted_ways = vec![ws[0].clone()];
     ws = ws[1..].to_vec();
     while !ws.is_empty() {
         let mut mindist = INFINITY;
@@ -174,8 +199,7 @@ fn dist_haversine(p1: &Node, p2: &Node) -> f64 {
 /// - This is not done by ST_LineMerge()
 /// - I'm not sure if this conserves the direction from first to last
 fn join_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> Result<Vec<Vec<Node>>, ()> {
-    let mut joined = Vec::new();
-    joined.push(ways[0].clone());
+    let mut joined = vec![ways[0].clone()];
     for w in ways[1..].to_vec() {
         let joined_len = joined.len();
         let joinedlast = joined[joined_len - 1].clone();
@@ -200,32 +224,175 @@ fn join_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> Result<Vec<Vec<Node>>, ()
     Ok(joined)
 }
 
+fn flatten_ways(
+    ways: &Vec<Vec<Node>>,
+    tolerance: f64,
+) -> Result<(Vec<Vec<Node>>, ParseStatus), ()> {
+    if ways.is_empty() {
+        return Ok((Vec::new(), ParseStatus::new(501, "Broken")));
+    }
+    let passed = first_pass(ways)?;
+    if passed.len() == 1 {
+        return Ok((passed, ParseStatus::ok()));
+    }
+    let sorted = sort_ways(&passed)?;
+    let sorted_passed = first_pass(&sorted)?;
+    if sorted_passed.len() == 1 {
+        return Ok((sorted_passed, ParseStatus::new(101, "Sorted")));
+    }
+    let joined = join_ways(&passed, tolerance)?;
+    if joined.len() == 1 {
+        return Ok((joined, ParseStatus::new(102, "Joined")));
+    }
+    let joined_sorted = join_ways(&sorted, tolerance)?;
+    if joined_sorted.len() == 1 {
+        return Ok((joined_sorted, ParseStatus::new(103, "Joined Sorted")));
+    }
+    Ok((Vec::new(), ParseStatus::new(501, "Broken")))
+}
+
+/// assert closedness of a linestring within a tolerance
+/// if it is not closed but in tolerance, close it
+fn close_linestring(way: &Vec<Node>, tolerance: f64) -> Result<(Vec<Node>, ParseStatus), ()> {
+    let mut closed = way.to_owned();
+    let mut closed_status = ParseStatus::ok();
+    if closed[0] == closed[closed.len() - 1] {
+        return Ok((closed, closed_status));
+    }
+    if dist_haversine(&closed[0], &closed[closed.len() - 1]) <= tolerance {
+        closed.push(closed[0].clone());
+        closed_status = ParseStatus::new(102, "Joined");
+        return Ok((closed, closed_status));
+    }
+    Ok((Vec::new(), ParseStatus::new(501, "Broken")))
+}
+
 impl Relation {
     /// best effort get a linestring or multilinestring from all the ways that compose this relation
     /// if `tolerance` is > 0, then it also join gaps in the ways into one linestring when possible
     /// `tolerance` is in meters
-    pub fn flatten_ways(&self, tolerance: f64) -> Result<(Vec<Vec<Node>>, ParseStatus), ()> {
+    /// param `closed` to assert that the linestring last first element is within tolerance to the first element
+    pub fn flatten_ways(
+        &self,
+        tolerance: f64,
+        closed: bool,
+    ) -> Result<(Vec<Vec<Node>>, ParseStatus), ParseError> {
         let ways: Vec<Vec<Node>> = self.ways.iter().map(|w| w.nodes.clone()).collect();
-        if ways.is_empty() {
-            return Ok((Vec::new(), ParseStatus::new(501, "Broken")));
+        let (f_ways, f_status) = flatten_ways(&ways, tolerance).unwrap();
+
+        // check and close if needed
+        if closed && f_status.code != 501 {
+            let mut f_ways_closed = Vec::new();
+            let mut f_status_closed = f_status;
+            for w in f_ways {
+                let (w_closed, w_status) = close_linestring(&w, tolerance).unwrap();
+                if w_status.code == 501 {
+                    f_status_closed = ParseStatus::new(501, "Broken");
+                }
+                if w_status.code != 501 && f_status_closed.code != 501 {
+                    f_status_closed = w_status;
+                }
+                f_ways_closed.push(w_closed);
+            }
+            Ok((f_ways_closed, f_status_closed))
+        } else {
+            Ok((f_ways, f_status))
         }
-        let passed = first_pass(&ways)?;
-        if passed.len() == 1 {
-            return Ok((passed, ParseStatus::ok()));
+    }
+}
+
+impl Way {
+    /// best effort get a closed linestring from the nodes that compose this way
+    /// if `tolerance` is > 0, then it also join gap in the way into one closed linestring when possible
+    /// `tolerance` is in meters
+    pub fn flatten_ways(
+        &self,
+        tolerance: f64,
+        closed: bool,
+    ) -> Result<(Vec<Vec<Node>>, ParseStatus), ()> {
+        let ways: Vec<Vec<Node>> = vec![self.nodes.clone()];
+        let (f_ways, f_status) = flatten_ways(&ways, tolerance).unwrap();
+
+        // check and close if needed
+        if closed && f_status.code != 501 {
+            let mut f_ways_closed = Vec::new();
+            let mut f_status_closed = f_status;
+            for w in f_ways {
+                let (w_closed, w_status) = close_linestring(&w, tolerance).unwrap();
+                if w_status.code == 501 {
+                    f_status_closed = ParseStatus::new(501, "Broken");
+                }
+                if w_status.code != 501 && f_status_closed.code != 501 {
+                    f_status_closed = w_status;
+                }
+                f_ways_closed.push(w_closed);
+            }
+            Ok((f_ways_closed, f_status_closed))
+        } else {
+            Ok((f_ways, f_status))
         }
-        let sorted = sort_ways(&passed)?;
-        let sorted_passed = first_pass(&sorted)?;
-        if sorted_passed.len() == 1 {
-            return Ok((sorted_passed, ParseStatus::new(101, "Sorted")));
-        }
-        let joined = join_ways(&passed, tolerance)?;
-        if joined.len() == 1 {
-            return Ok((joined, ParseStatus::new(102, "Joined")));
-        }
-        let joined_sorted = join_ways(&sorted, tolerance)?;
-        if joined_sorted.len() == 1 {
-            return Ok((joined_sorted, ParseStatus::new(103, "Joined Sorted")));
-        }
-        Ok((Vec::new(), ParseStatus::new(501, "Broken")))
+    }
+}
+
+impl Area {
+    pub fn to_geojson(&self) -> String {
+        json!({
+            "type": "Feature",
+            "properties": {
+                "id": self.id,
+                "tags": self.tags,
+                "info": self.info,
+                "parse_status": {
+                    "code": self.parse_status.code,
+                    "detail": self.parse_status.detail,
+                }
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": self.geometry
+            }
+        })
+        .to_string()
+    }
+}
+
+impl PublicTransport {
+    pub fn to_geojson(&self) -> String {
+        json!({
+            "type": "FeatureCollection",
+            "properties": {
+                "id": self.id,
+                "tags": self.tags,
+                "info": self.info,
+                "parse_status": {
+                    "code": self.parse_status.code,
+                    "detail": self.parse_status.detail,
+                }
+            },
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": self.geometry
+                    }
+                },
+                {
+                    "type": "FeatureCollection",
+                    "features": self.stops.iter().map(|s| json!({
+                        "type": "Feature",
+                        "properties": {
+                            "id": s.id,
+                            "tags": s.tags,
+                        },
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [s.lon, s.lat]
+                        }
+                    })).collect::<Vec<_>>()
+                },
+            ]
+        })
+        .to_string()
     }
 }

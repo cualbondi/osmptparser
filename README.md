@@ -17,6 +17,18 @@ Time it
 cargo build --release --example main && /usr/bin/time -v target/release/examples/main ecuador-latest.osm.pbf
 ```
 
+## CLI
+
+```
+cargo run --release ./ecuador-latest.osm.pbf --filter "boundary=national_park"
+```
+you should get a json list with one geojson per area that matches with the filter
+
+```
+cargo run --release ./ecuador-latest.osm.pbf --filter-ptv2
+```
+you should get a json list with one geojson per ptv2 containing a linestring and each stop
+
 ## Run CI linter + recommendations + tests
 
 ```
