@@ -49,20 +49,20 @@ fn main() {
     let input_filename = &args.filename.into_os_string().into_string().unwrap();
     if args.filter_ptv2 {
         let parser = Parser::new_ptv2(input_filename, cpus);
-        print!("[");
+        println!("[");
         let mut first = true;
         for pt in parser.get_public_transports(args.gap) {
-            print!("{}", pt.to_geojson());
             if !first {
                 println!(",");
             } else {
                 first = false;
             }
+            print!("  {}", pt.to_geojson());
         }
         print!("]");
     } else {
         let parser = Parser::new(input_filename, cpus, args.filter);
-        print!("[");
+        println!("[");
         let mut first = true;
         for area in parser.get_areas(args.gap) {
             if area.parse_status.code != 0 {
@@ -71,13 +71,14 @@ fn main() {
             if area.geometry.is_empty() {
                 continue;
             }
-            print!("{}", area.to_geojson());
             if !first {
                 println!(",");
             } else {
                 first = false;
             }
+            print!("  {}", area.to_geojson());
         }
-        print!("]");
+        println!();
+        println!("]");
     }
 }

@@ -623,7 +623,7 @@ impl Parser {
                             .collect(),
                         parse_status: s,
                     };
-                    println!("{:?}", area);
+                    // println!("{:?}", area);
                     res_tx.send(area).unwrap();
                 });
             }
