@@ -89,13 +89,22 @@ impl Parser {
         for condition in conditions.split('&') {
             let mut condition_split = condition.split('=');
             let condition_key = condition_split.next().unwrap().to_string();
-            let condition_value = condition_split.next();
+            let condition_values = condition_split.next();
             let tag = relation.tags().find(|&kv| kv.0 == condition_key);
             if tag == None {
                 return false;
-            } else if condition_value != None {
-                let condition_value_string = condition_value.unwrap().to_string();
-                if tag.unwrap().1 != condition_value_string {
+            } else if condition_values != None {
+                let tag_value = tag.unwrap().1;
+                let condition_values_string = condition_values.unwrap().to_string();
+                let condition_values_split = condition_values_string.split(',');
+                let mut found = false;
+                for condition_value in condition_values_split {
+                    if tag_value == condition_value {
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
                     return false;
                 }
             }
@@ -107,17 +116,26 @@ impl Parser {
     /// "tag_key"
     /// "tag_key=tag_value"
     /// "tag_key=tag_value,tag_value2&tag_key2=tag_value3"
-    fn filter_way(relation: &osm_pbf_iter::Way, conditions: &String) -> bool {
+    fn filter_way(way: &osm_pbf_iter::Way, conditions: &String) -> bool {
         for condition in conditions.split('&') {
             let mut condition_split = condition.split('=');
             let condition_key = condition_split.next().unwrap().to_string();
-            let condition_value = condition_split.next();
-            let tag = relation.tags().find(|&kv| kv.0 == condition_key);
+            let condition_values = condition_split.next();
+            let tag = way.tags().find(|&kv| kv.0 == condition_key);
             if tag == None {
                 return false;
-            } else if condition_value != None {
-                let condition_value_string = condition_value.unwrap().to_string();
-                if tag.unwrap().1 != condition_value_string {
+            } else if condition_values != None {
+                let tag_value = tag.unwrap().1;
+                let condition_values_string = condition_values.unwrap().to_string();
+                let condition_values_split = condition_values_string.split(',');
+                let mut found = false;
+                for condition_value in condition_values_split {
+                    if tag_value == condition_value {
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
                     return false;
                 }
             }

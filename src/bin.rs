@@ -15,7 +15,7 @@ struct Cli {
     /// Example values:
     /// - "natural=beach": only areas wich are beaches
     /// - "name&natural=beach": areas wich are beaches and have a name
-    /// - "name&admin_level&boundary=administrative": administrative areas with name and level
+    /// - "name&admin_level=1,2,3&boundary=administrative": administrative areas with name and level values of 1 or 2 or 3
     #[structopt(short = "f", long = "filter")]
     filter: String,
 
