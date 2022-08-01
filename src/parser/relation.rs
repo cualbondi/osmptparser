@@ -73,6 +73,8 @@ pub struct PublicTransport {
 pub struct Area {
     /// osm id
     pub id: u64,
+    /// osm object type (n=node, w=way, r=relation)
+    pub id_type: char,
     /// osm tags of the Area
     pub tags: HashMap<String, String>,
     /// osm metadata of the Area
@@ -340,6 +342,7 @@ impl Area {
             "type": "Feature",
             "properties": {
                 "id": self.id,
+                "id_type": self.id_type,
                 "tags": self.tags,
                 "info": self.info,
                 "parse_status": {

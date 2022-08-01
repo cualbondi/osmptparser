@@ -582,6 +582,7 @@ impl Parser {
             let (f, s) = r.flatten_ways(gap, true).unwrap();
             Area {
                 id: r.id,
+                id_type: 'r',
                 tags: r.tags,
                 info: r.info,
                 geometry: f
@@ -615,6 +616,7 @@ impl Parser {
                     let (f, s) = way.flatten_ways(gap, true).unwrap();
                     let area = Area {
                         id: way.id,
+                        id_type: 'w',
                         tags: way.tags,
                         info: way.info,
                         geometry: f
