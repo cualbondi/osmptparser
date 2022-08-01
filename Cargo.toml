@@ -1,7 +1,7 @@
 [package]
 name = "osmptparser"
 description = "Openstreetmap Public Transport Parser"
-version = "2.0.0"
+version = "2.1.0"
 authors = ["Julian Perelli <jperelli@gmail.com>"]
 edition = "2018"
 license = "AGPL-3.0-or-later"

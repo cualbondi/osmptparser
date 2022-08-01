@@ -1,3 +1,11 @@
+## v2.1.0
+
+Added minor features
+
+ - Added: Filtering accepts multiple valid values separated by commas.
+ - Added: Also returning osm_type (r/w/n) together with osm_id in the JSON.
+ - Fixed: JSON output is now valid JSON.
+
 ## v2.0.0
 
 Added generic filtering
