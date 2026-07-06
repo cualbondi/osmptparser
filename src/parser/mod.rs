@@ -138,32 +138,16 @@ impl Parser {
             .collect()
     }
 
-    /// check a relation against pre-parsed filter conditions (see `parse_filters`)
-    fn filter_relation(relation: &osm_pbf_iter::Relation, conditions: &[Condition]) -> bool {
+    /// check an element's tags against pre-parsed filter conditions (see `parse_filters`).
+    /// `get_tags` yields the element's tags as `(key, value)` pairs and is called once per
+    /// condition, matching the way both relations and ways expose their tags.
+    fn matches_conditions<'a, I, F>(mut get_tags: F, conditions: &[Condition]) -> bool
+    where
+        F: FnMut() -> I,
+        I: Iterator<Item = (&'a str, &'a str)>,
+    {
         for condition in conditions {
-            let tag = relation.tags().find(|&kv| kv.0 == condition.key);
-            if (condition.key_negated && tag.is_some()) || (!condition.key_negated && tag.is_none())
-            {
-                return false;
-            }
-            if let Some(values) = &condition.values {
-                let tag_value = tag.unwrap().1;
-                let found = values.iter().any(|cv| {
-                    (cv.negated && tag_value != cv.value.as_str())
-                        || (!cv.negated && tag_value == cv.value.as_str())
-                });
-                if !found {
-                    return false;
-                }
-            }
-        }
-        true
-    }
-
-    /// check a way against pre-parsed filter conditions (see `parse_filters`)
-    fn filter_way(way: &osm_pbf_iter::Way, conditions: &[Condition]) -> bool {
-        for condition in conditions {
-            let tag = way.tags().find(|&kv| kv.0 == condition.key);
+            let tag = get_tags().find(|&kv| kv.0 == condition.key);
             if (condition.key_negated && tag.is_some()) || (!condition.key_negated && tag.is_none())
             {
                 return false;
@@ -241,7 +225,10 @@ impl Parser {
                         let primitive_block = PrimitiveBlock::parse(&data);
                         for primitive in primitive_block.primitives() {
                             if let Primitive::Relation(relation) = primitive {
-                                if Self::filter_relation(&relation, filters_local.as_ref()) {
+                                if Self::matches_conditions(
+                                    || relation.tags(),
+                                    filters_local.as_ref(),
+                                ) {
                                     let mut info: HashMap<String, String> = HashMap::new();
                                     if let Some(info_data) = relation.info.clone() {
                                         if let Some(version) = info_data.version {
@@ -380,7 +367,7 @@ impl Parser {
                                     );
                                 }
                                 // ways, collect ways that are not part of relations previously found but conform to filters
-                                if Self::filter_way(&way, filters_local.as_ref()) {
+                                if Self::matches_conditions(|| way.tags(), filters_local.as_ref()) {
                                     let mut info: HashMap<String, String> = HashMap::new();
                                     if let Some(info_data) = way.info.clone() {
                                         if let Some(version) = info_data.version {

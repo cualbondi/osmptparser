@@ -8,6 +8,7 @@ Bugfix and test coverage
  - Fixed: `Debug for Parser` panicked on relations without a `name` tag.
  - Changed: `Parser::get_relation_from_id` now takes `&self` instead of consuming the `Parser`.
  - Changed: filter string is now parsed once into conditions instead of being re-parsed for every relation and way.
+ - Changed: merged the near-identical `filter_relation` and `filter_way` into a single `matches_conditions` helper.
 
 ## v2.2.0
 
