@@ -1,4 +1,5 @@
 extern crate num_cpus;
+use osmptparser::ParseStatus;
 use osmptparser::Parser;
 use structopt::StructOpt;
 
@@ -65,7 +66,7 @@ fn main() -> std::io::Result<()> {
         println!("[");
         let mut first = true;
         for area in parser.get_areas(args.gap) {
-            if area.parse_status.code != 0 {
+            if area.parse_status != ParseStatus::Ok {
                 continue;
             }
             if area.geometry.is_empty() {

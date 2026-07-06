@@ -231,26 +231,26 @@ fn flatten_ways(
     tolerance: f64,
 ) -> Result<(Vec<Vec<Node>>, ParseStatus), ()> {
     if ways.is_empty() {
-        return Ok((Vec::new(), ParseStatus::new(501, "Broken")));
+        return Ok((Vec::new(), ParseStatus::Broken));
     }
     let passed = first_pass(ways)?;
     if passed.len() == 1 {
-        return Ok((passed, ParseStatus::ok()));
+        return Ok((passed, ParseStatus::Ok));
     }
     let sorted = sort_ways(&passed)?;
     let sorted_passed = first_pass(&sorted)?;
     if sorted_passed.len() == 1 {
-        return Ok((sorted_passed, ParseStatus::new(101, "Sorted")));
+        return Ok((sorted_passed, ParseStatus::Sorted));
     }
     let joined = join_ways(&passed, tolerance)?;
     if joined.len() == 1 {
-        return Ok((joined, ParseStatus::new(102, "Joined")));
+        return Ok((joined, ParseStatus::Joined));
     }
     let joined_sorted = join_ways(&sorted, tolerance)?;
     if joined_sorted.len() == 1 {
-        return Ok((joined_sorted, ParseStatus::new(103, "Joined Sorted")));
+        return Ok((joined_sorted, ParseStatus::JoinedSorted));
     }
-    Ok((Vec::new(), ParseStatus::new(501, "Broken")))
+    Ok((Vec::new(), ParseStatus::Broken))
 }
 
 /// close every linestring in `f_ways` when `closed` is requested and the flatten
@@ -261,17 +261,17 @@ fn close_if_needed(
     tolerance: f64,
     closed: bool,
 ) -> (Vec<Vec<Node>>, ParseStatus) {
-    if !closed || f_status.code == 501 {
+    if !closed || f_status == ParseStatus::Broken {
         return (f_ways, f_status);
     }
     let mut f_ways_closed = Vec::new();
     let mut f_status_closed = f_status;
     for w in f_ways {
         let (w_closed, w_status) = close_linestring(&w, tolerance).unwrap();
-        if w_status.code == 501 {
-            f_status_closed = ParseStatus::new(501, "Broken");
+        if w_status == ParseStatus::Broken {
+            f_status_closed = ParseStatus::Broken;
         }
-        if w_status.code != 501 && f_status_closed.code != 501 {
+        if w_status != ParseStatus::Broken && f_status_closed != ParseStatus::Broken {
             f_status_closed = w_status;
         }
         f_ways_closed.push(w_closed);
@@ -283,16 +283,16 @@ fn close_if_needed(
 /// if it is not closed but in tolerance, close it
 fn close_linestring(way: &Vec<Node>, tolerance: f64) -> Result<(Vec<Node>, ParseStatus), ()> {
     let mut closed = way.to_owned();
-    let mut closed_status = ParseStatus::ok();
+    let mut closed_status = ParseStatus::Ok;
     if closed[0] == closed[closed.len() - 1] {
         return Ok((closed, closed_status));
     }
     if dist_haversine(&closed[0], &closed[closed.len() - 1]) <= tolerance {
         closed.push(closed[0].clone());
-        closed_status = ParseStatus::new(102, "Joined");
+        closed_status = ParseStatus::Joined;
         return Ok((closed, closed_status));
     }
-    Ok((Vec::new(), ParseStatus::new(501, "Broken")))
+    Ok((Vec::new(), ParseStatus::Broken))
 }
 
 impl Relation {
@@ -340,8 +340,8 @@ impl Area {
                 "tags": self.tags,
                 "info": self.info,
                 "parse_status": {
-                    "code": self.parse_status.code,
-                    "detail": self.parse_status.detail,
+                    "code": self.parse_status.code(),
+                    "detail": self.parse_status.detail(),
                 }
             },
             "geometry": {
@@ -362,8 +362,8 @@ impl PublicTransport {
                 "tags": self.tags,
                 "info": self.info,
                 "parse_status": {
-                    "code": self.parse_status.code,
-                    "detail": self.parse_status.detail,
+                    "code": self.parse_status.code(),
+                    "detail": self.parse_status.detail(),
                 }
             },
             "features": [
@@ -541,7 +541,7 @@ mod tests {
     fn close_linestring_leaves_already_closed_ring_untouched() {
         let way = vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001), n(1, 0.0, 0.0)];
         let (closed, status) = close_linestring(&way, 50.0).unwrap();
-        assert_eq!(status.code, 0);
+        assert_eq!(status, ParseStatus::Ok);
         assert_eq!(ids(&closed), vec![1, 2, 1]);
     }
 
@@ -550,7 +550,7 @@ mod tests {
         // last node is ~11 m from the first, closeable within 50 m
         let way = vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001), n(3, 0.0, 0.0001)];
         let (closed, status) = close_linestring(&way, 50.0).unwrap();
-        assert_eq!(status.code, 102);
+        assert_eq!(status, ParseStatus::Joined);
         assert_eq!(closed.len(), 4);
         assert_eq!(closed[0], closed[closed.len() - 1]);
     }
@@ -559,14 +559,14 @@ mod tests {
     fn close_linestring_reports_broken_when_out_of_tolerance() {
         let way = vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)];
         let (closed, status) = close_linestring(&way, 50.0).unwrap();
-        assert_eq!(status.code, 501);
+        assert_eq!(status, ParseStatus::Broken);
         assert!(closed.is_empty());
     }
 
     #[test]
     fn flatten_ways_empty_is_broken() {
         let (out, status) = flatten_ways(&Vec::new(), 50.0).unwrap();
-        assert_eq!(status.code, 501);
+        assert_eq!(status, ParseStatus::Broken);
         assert!(out.is_empty());
     }
 
@@ -577,7 +577,7 @@ mod tests {
             vec![n(2, 0.0, 1.0), n(3, 0.0, 2.0)],
         ];
         let (out, status) = flatten_ways(&ways, 50.0).unwrap();
-        assert_eq!(status.code, 0);
+        assert_eq!(status, ParseStatus::Ok);
         assert_eq!(out.len(), 1);
         assert_eq!(ids(&out[0]), vec![1, 2, 3]);
     }
@@ -589,7 +589,7 @@ mod tests {
             vec![n(3, 0.0, 0.0011), n(4, 0.0, 0.002)],
         ];
         let (out, status) = flatten_ways(&ways, 50.0).unwrap();
-        assert_eq!(status.code, 102);
+        assert_eq!(status, ParseStatus::Joined);
         assert_eq!(out.len(), 1);
     }
 
@@ -600,7 +600,7 @@ mod tests {
             vec![n(3, 0.0, 10.0), n(4, 0.0, 11.0)],
         ];
         let (out, status) = flatten_ways(&ways, 50.0).unwrap();
-        assert_eq!(status.code, 501);
+        assert_eq!(status, ParseStatus::Broken);
         assert!(out.is_empty());
     }
 }
