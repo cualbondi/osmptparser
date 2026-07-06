@@ -1,3 +1,10 @@
+## Unreleased
+
+Bugfix and test coverage
+
+ - Fixed: `edgedistance`, `sort_ways` did not actually sort ways by proximity.
+ - Added: unit tests pinning the geometry functions (pointdistance, dist_haversine, edgedistance, first_pass, sort_ways, join_ways, close_linestring, flatten_ways).
+
 ## v2.2.0
 
 Added filtering by negation

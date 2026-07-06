@@ -100,7 +100,7 @@ fn edgedistance(w1: &Vec<Node>, w2: &Vec<Node>) -> f64 {
         pointdistance(w1p2, w2p1),
     ]
     .iter()
-    .fold(-1f64, |a, b| if a < *b { a } else { *b })
+    .fold(f64::INFINITY, |a, b| if a < *b { a } else { *b })
 }
 
 /// try to reverse directions in linestrings
@@ -397,5 +397,216 @@ impl PublicTransport {
             ]
         })
         .to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// build a bare node (equality only depends on `id`)
+    fn n(id: u64, lat: f64, lon: f64) -> Node {
+        Node {
+            id,
+            tags: HashMap::new(),
+            lat,
+            lon,
+        }
+    }
+
+    /// ids of the nodes in a single way, in order
+    fn ids(way: &[Node]) -> Vec<u64> {
+        way.iter().map(|node| node.id).collect()
+    }
+
+    /// id of the first node of each way
+    fn first_ids(ways: &[Vec<Node>]) -> Vec<u64> {
+        ways.iter().map(|w| w[0].id).collect()
+    }
+
+    const EPS: f64 = 1e-9;
+
+    #[test]
+    fn pointdistance_is_euclidean() {
+        // 3-4-5 triangle in (lat, lon) space
+        assert!((pointdistance(&n(1, 0.0, 0.0), &n(2, 3.0, 4.0)) - 5.0).abs() < EPS);
+        assert!(pointdistance(&n(1, 0.0, 0.0), &n(2, 0.0, 0.0)).abs() < EPS);
+    }
+
+    #[test]
+    fn dist_haversine_one_degree_of_latitude() {
+        // one degree of latitude is ~111.19 km on a 6_371_000 m sphere
+        let d = dist_haversine(&n(1, 0.0, 0.0), &n(2, 1.0, 0.0));
+        assert!((d - 111_194.93).abs() < 1.0, "got {}", d);
+        assert!(dist_haversine(&n(1, 0.0, 0.0), &n(2, 0.0, 0.0)).abs() < EPS);
+    }
+
+    #[test]
+    fn edgedistance_returns_min_endpoint_distance() {
+        // closest endpoints are (0,10)&(0,11) -> distance 1
+        let w1 = vec![n(1, 0.0, 0.0), n(2, 0.0, 10.0)];
+        let w2 = vec![n(3, 0.0, 11.0), n(4, 0.0, 20.0)];
+        let d = edgedistance(&w1, &w2);
+        assert!((d - 1.0).abs() < EPS, "got {}", d);
+        // regression: seeded with -1.0 the fold always returned -1.0
+        assert!(d > 0.0, "edgedistance must be a real distance, got {}", d);
+    }
+
+    #[test]
+    fn first_pass_joins_a_forward_chain() {
+        let ways = vec![
+            vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)],
+            vec![n(2, 0.0, 1.0), n(3, 0.0, 2.0)],
+        ];
+        let out = first_pass(&ways).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(ids(&out[0]), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn first_pass_reverses_the_second_segment() {
+        // second way shares its *last* node with the chain, so it is reversed
+        let ways = vec![
+            vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)],
+            vec![n(3, 0.0, 2.0), n(2, 0.0, 1.0)],
+        ];
+        let out = first_pass(&ways).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(ids(&out[0]), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn first_pass_reverses_the_first_segment() {
+        // first way must be reversed so its end matches the second way's start
+        let ways = vec![
+            vec![n(2, 0.0, 1.0), n(1, 0.0, 0.0)],
+            vec![n(2, 0.0, 1.0), n(3, 0.0, 2.0)],
+        ];
+        let out = first_pass(&ways).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(ids(&out[0]), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn first_pass_keeps_disconnected_ways_separate() {
+        let ways = vec![
+            vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)],
+            vec![n(3, 0.0, 5.0), n(4, 0.0, 6.0)],
+        ];
+        let out = first_pass(&ways).unwrap();
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn sort_ways_orders_by_proximity() {
+        // way1 is closest to way0's end, so it must come before the far way2.
+        // with the old edgedistance bug every distance was -1.0 and the input
+        // order [0, 2, 1] was preserved instead.
+        let way0 = vec![n(10, 0.0, 0.0), n(11, 0.0, 1.0)];
+        let way1 = vec![n(20, 0.0, 1.5), n(21, 0.0, 2.0)];
+        let way2 = vec![n(30, 0.0, 10.0), n(31, 0.0, 11.0)];
+        let sorted = sort_ways(&vec![way0, way2, way1]).unwrap();
+        assert_eq!(first_ids(&sorted), vec![10, 20, 30]);
+    }
+
+    #[test]
+    fn join_ways_bridges_a_gap_within_tolerance() {
+        // ~11 m gap between the two ways
+        let ways = vec![
+            vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001)],
+            vec![n(3, 0.0, 0.0011), n(4, 0.0, 0.002)],
+        ];
+        let joined = join_ways(&ways, 50.0).unwrap();
+        assert_eq!(joined.len(), 1);
+        assert_eq!(ids(&joined[0]), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn join_ways_reverses_a_segment_to_bridge_a_gap() {
+        // second way is oriented backwards; its last node is the near one
+        let ways = vec![
+            vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001)],
+            vec![n(3, 0.0, 0.002), n(4, 0.0, 0.0011)],
+        ];
+        let joined = join_ways(&ways, 50.0).unwrap();
+        assert_eq!(joined.len(), 1);
+        assert_eq!(ids(&joined[0]), vec![1, 2, 4, 3]);
+    }
+
+    #[test]
+    fn join_ways_keeps_ways_apart_when_gap_exceeds_tolerance() {
+        let ways = vec![
+            vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001)],
+            vec![n(3, 0.0, 0.0011), n(4, 0.0, 0.002)],
+        ];
+        let joined = join_ways(&ways, 5.0).unwrap();
+        assert_eq!(joined.len(), 2);
+    }
+
+    #[test]
+    fn close_linestring_leaves_already_closed_ring_untouched() {
+        let way = vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001), n(1, 0.0, 0.0)];
+        let (closed, status) = close_linestring(&way, 50.0).unwrap();
+        assert_eq!(status.code, 0);
+        assert_eq!(ids(&closed), vec![1, 2, 1]);
+    }
+
+    #[test]
+    fn close_linestring_closes_a_ring_within_tolerance() {
+        // last node is ~11 m from the first, closeable within 50 m
+        let way = vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001), n(3, 0.0, 0.0001)];
+        let (closed, status) = close_linestring(&way, 50.0).unwrap();
+        assert_eq!(status.code, 102);
+        assert_eq!(closed.len(), 4);
+        assert_eq!(closed[0], closed[closed.len() - 1]);
+    }
+
+    #[test]
+    fn close_linestring_reports_broken_when_out_of_tolerance() {
+        let way = vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)];
+        let (closed, status) = close_linestring(&way, 50.0).unwrap();
+        assert_eq!(status.code, 501);
+        assert!(closed.is_empty());
+    }
+
+    #[test]
+    fn flatten_ways_empty_is_broken() {
+        let (out, status) = flatten_ways(&Vec::new(), 50.0).unwrap();
+        assert_eq!(status.code, 501);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn flatten_ways_connected_chain_is_ok() {
+        let ways = vec![
+            vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)],
+            vec![n(2, 0.0, 1.0), n(3, 0.0, 2.0)],
+        ];
+        let (out, status) = flatten_ways(&ways, 50.0).unwrap();
+        assert_eq!(status.code, 0);
+        assert_eq!(out.len(), 1);
+        assert_eq!(ids(&out[0]), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn flatten_ways_bridges_small_gap_as_joined() {
+        let ways = vec![
+            vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001)],
+            vec![n(3, 0.0, 0.0011), n(4, 0.0, 0.002)],
+        ];
+        let (out, status) = flatten_ways(&ways, 50.0).unwrap();
+        assert_eq!(status.code, 102);
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn flatten_ways_reports_broken_when_gaps_exceed_tolerance() {
+        let ways = vec![
+            vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)],
+            vec![n(3, 0.0, 10.0), n(4, 0.0, 11.0)],
+        ];
+        let (out, status) = flatten_ways(&ways, 50.0).unwrap();
+        assert_eq!(status.code, 501);
+        assert!(out.is_empty());
     }
 }
