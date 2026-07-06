@@ -253,6 +253,32 @@ fn flatten_ways(
     Ok((Vec::new(), ParseStatus::new(501, "Broken")))
 }
 
+/// close every linestring in `f_ways` when `closed` is requested and the flatten
+/// did not already fail, propagating a Broken status if any of them cannot be closed
+fn close_if_needed(
+    f_ways: Vec<Vec<Node>>,
+    f_status: ParseStatus,
+    tolerance: f64,
+    closed: bool,
+) -> (Vec<Vec<Node>>, ParseStatus) {
+    if !closed || f_status.code == 501 {
+        return (f_ways, f_status);
+    }
+    let mut f_ways_closed = Vec::new();
+    let mut f_status_closed = f_status;
+    for w in f_ways {
+        let (w_closed, w_status) = close_linestring(&w, tolerance).unwrap();
+        if w_status.code == 501 {
+            f_status_closed = ParseStatus::new(501, "Broken");
+        }
+        if w_status.code != 501 && f_status_closed.code != 501 {
+            f_status_closed = w_status;
+        }
+        f_ways_closed.push(w_closed);
+    }
+    (f_ways_closed, f_status_closed)
+}
+
 /// assert closedness of a linestring within a tolerance
 /// if it is not closed but in tolerance, close it
 fn close_linestring(way: &Vec<Node>, tolerance: f64) -> Result<(Vec<Node>, ParseStatus), ()> {
@@ -283,23 +309,7 @@ impl Relation {
         let (f_ways, f_status) = flatten_ways(&ways, tolerance).unwrap();
 
         // check and close if needed
-        if closed && f_status.code != 501 {
-            let mut f_ways_closed = Vec::new();
-            let mut f_status_closed = f_status;
-            for w in f_ways {
-                let (w_closed, w_status) = close_linestring(&w, tolerance).unwrap();
-                if w_status.code == 501 {
-                    f_status_closed = ParseStatus::new(501, "Broken");
-                }
-                if w_status.code != 501 && f_status_closed.code != 501 {
-                    f_status_closed = w_status;
-                }
-                f_ways_closed.push(w_closed);
-            }
-            Ok((f_ways_closed, f_status_closed))
-        } else {
-            Ok((f_ways, f_status))
-        }
+        Ok(close_if_needed(f_ways, f_status, tolerance, closed))
     }
 }
 
@@ -316,23 +326,7 @@ impl Way {
         let (f_ways, f_status) = flatten_ways(&ways, tolerance).unwrap();
 
         // check and close if needed
-        if closed && f_status.code != 501 {
-            let mut f_ways_closed = Vec::new();
-            let mut f_status_closed = f_status;
-            for w in f_ways {
-                let (w_closed, w_status) = close_linestring(&w, tolerance).unwrap();
-                if w_status.code == 501 {
-                    f_status_closed = ParseStatus::new(501, "Broken");
-                }
-                if w_status.code != 501 && f_status_closed.code != 501 {
-                    f_status_closed = w_status;
-                }
-                f_ways_closed.push(w_closed);
-            }
-            Ok((f_ways_closed, f_status_closed))
-        } else {
-            Ok((f_ways, f_status))
-        }
+        Ok(close_if_needed(f_ways, f_status, tolerance, closed))
     }
 }
 

@@ -9,6 +9,7 @@ Bugfix and test coverage
  - Changed: `Parser::get_relation_from_id` now takes `&self` instead of consuming the `Parser`.
  - Changed: filter string is now parsed once into conditions instead of being re-parsed for every relation and way.
  - Changed: merged the near-identical `filter_relation` and `filter_way` into a single `matches_conditions` helper.
+ - Refactored: extracted the shared close-linestring loop from `Relation::flatten_ways` and `Way::flatten_ways` into a `close_if_needed` helper.
 
 ## v2.2.0
 
