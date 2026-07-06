@@ -166,6 +166,33 @@ impl Parser {
         true
     }
 
+    /// collect the optional osm metadata (version/timestamp/changeset/uid/user/visible)
+    /// of a relation or way into a string map, skipping absent fields
+    fn info_map(info: Option<&osm_pbf_iter::info::Info>) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        if let Some(info) = info {
+            if let Some(version) = info.version {
+                map.insert("version".to_string(), version.to_string());
+            }
+            if let Some(timestamp) = info.timestamp {
+                map.insert("timestamp".to_string(), timestamp.to_string());
+            }
+            if let Some(changeset) = info.changeset {
+                map.insert("changeset".to_string(), changeset.to_string());
+            }
+            if let Some(uid) = info.uid {
+                map.insert("uid".to_string(), uid.to_string());
+            }
+            if let Some(user) = info.user {
+                map.insert("user".to_string(), user.to_string());
+            }
+            if let Some(visible) = info.visible {
+                map.insert("visible".to_string(), visible.to_string());
+            }
+        }
+        map
+    }
+
     /// creates internal cache by parsing public transport v2 from pbf file in the `pbf_filename` path, in parallel with `cpus` threads
     pub fn new_ptv2(pbf_filename: &str, cpus: usize) -> io::Result<Self> {
         Self::new(
@@ -229,33 +256,7 @@ impl Parser {
                                     || relation.tags(),
                                     filters_local.as_ref(),
                                 ) {
-                                    let mut info: HashMap<String, String> = HashMap::new();
-                                    if let Some(info_data) = relation.info.clone() {
-                                        if let Some(version) = info_data.version {
-                                            info.insert("version".to_string(), version.to_string());
-                                        }
-                                        if let Some(timestamp) = info_data.timestamp {
-                                            info.insert(
-                                                "timestamp".to_string(),
-                                                timestamp.to_string(),
-                                            );
-                                        }
-                                        if let Some(changeset) = info_data.changeset {
-                                            info.insert(
-                                                "changeset".to_string(),
-                                                changeset.to_string(),
-                                            );
-                                        }
-                                        if let Some(uid) = info_data.uid {
-                                            info.insert("uid".to_string(), uid.to_string());
-                                        }
-                                        if let Some(user) = info_data.user {
-                                            info.insert("user".to_string(), user.to_string());
-                                        }
-                                        if let Some(visible) = info_data.visible {
-                                            info.insert("visible".to_string(), visible.to_string());
-                                        }
-                                    }
+                                    let info = Self::info_map(relation.info.as_ref());
                                     // condicion para saber si esta relation es un public transport
                                     let mut rd = RelationData {
                                         id: relation.id,
@@ -368,33 +369,7 @@ impl Parser {
                                 }
                                 // ways, collect ways that are not part of relations previously found but conform to filters
                                 if Self::matches_conditions(|| way.tags(), filters_local.as_ref()) {
-                                    let mut info: HashMap<String, String> = HashMap::new();
-                                    if let Some(info_data) = way.info.clone() {
-                                        if let Some(version) = info_data.version {
-                                            info.insert("version".to_string(), version.to_string());
-                                        }
-                                        if let Some(timestamp) = info_data.timestamp {
-                                            info.insert(
-                                                "timestamp".to_string(),
-                                                timestamp.to_string(),
-                                            );
-                                        }
-                                        if let Some(changeset) = info_data.changeset {
-                                            info.insert(
-                                                "changeset".to_string(),
-                                                changeset.to_string(),
-                                            );
-                                        }
-                                        if let Some(uid) = info_data.uid {
-                                            info.insert("uid".to_string(), uid.to_string());
-                                        }
-                                        if let Some(user) = info_data.user {
-                                            info.insert("user".to_string(), user.to_string());
-                                        }
-                                        if let Some(visible) = info_data.visible {
-                                            info.insert("visible".to_string(), visible.to_string());
-                                        }
-                                    }
+                                    let info = Self::info_map(way.info.as_ref());
                                     let wd = WayData {
                                         id: way.id,
                                         tags: way
