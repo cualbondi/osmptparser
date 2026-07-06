@@ -572,7 +572,7 @@ impl Parser {
     {
         let cpus = self.cpus;
         let mut workers = Vec::with_capacity(cpus);
-        let index = Arc::new(RwLock::new(AtomicUsize::new(0)));
+        let index = Arc::new(AtomicUsize::new(0));
         crossbeam::scope(|s| {
             for _ in 0..cpus {
                 let (res_tx, res_rx) = sync_channel(200);
@@ -580,11 +580,7 @@ impl Parser {
                 let index_local = index.clone();
                 let process = process.clone();
                 s.spawn(move |_| loop {
-                    let index;
-                    {
-                        let index_write = index_local.write().unwrap();
-                        index = index_write.fetch_add(1, Ordering::SeqCst);
-                    }
+                    let index = index_local.fetch_add(1, Ordering::SeqCst);
                     if index >= length {
                         break;
                     }

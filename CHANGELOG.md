@@ -6,6 +6,7 @@ Bugfix and test coverage
  - Fixed: `edgedistance`, `sort_ways` did not actually sort ways by proximity.
  - Added: unit tests pinning the geometry functions (pointdistance, dist_haversine, edgedistance, first_pass, sort_ways, join_ways, close_linestring, flatten_ways).
  - Fixed: `Debug for Parser` panicked on relations without a `name` tag.
+ - Internal: dropped the redundant `RwLock` around the parallel work-index `AtomicUsize` (the atomic is already thread-safe), removing needless lock contention.
  - Changed: `Parser::get_relation_from_id` now takes `&self` instead of consuming the `Parser`.
  - Changed: filter string is now parsed once into conditions instead of being re-parsed for every relation and way.
  - Changed: merged the near-identical `filter_relation` and `filter_way` into a single `matches_conditions` helper.
