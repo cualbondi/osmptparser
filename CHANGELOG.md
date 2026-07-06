@@ -7,6 +7,7 @@ Bugfix and test coverage
  - **BREAKING**: `Parser::get_relation_from_id` now returns `Option<Relation>` (`None` when no relation with that id was parsed) instead of panicking on a missing id.
  - Fixed: `edgedistance`, `sort_ways` did not actually sort ways by proximity.
  - Fixed: empty ways from clipped extracts no longer panic the flatten pipeline; they are skipped and the geometry is reported as `Broken` when nothing usable remains.
+ - Fixed: closing a linestring no longer discards the flatten workaround status; the flatten and close steps' workarounds are now unioned (e.g. a sorted ring that also needed joining now reports `JoinedSorted` instead of `Joined`).
  - Added: unit tests pinning the geometry functions (pointdistance, dist_haversine, edgedistance, first_pass, sort_ways, join_ways, close_linestring, flatten_ways).
  - Fixed: `Debug for Parser` panicked on relations without a `name` tag.
  - Internal: dropped the redundant `RwLock` around the parallel work-index `AtomicUsize` (the atomic is already thread-safe), removing needless lock contention.

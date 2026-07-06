@@ -268,12 +268,9 @@ fn close_if_needed(
     let mut f_status_closed = f_status;
     for w in f_ways {
         let (w_closed, w_status) = close_linestring(&w, tolerance).unwrap();
-        if w_status == ParseStatus::Broken {
-            f_status_closed = ParseStatus::Broken;
-        }
-        if w_status != ParseStatus::Broken && f_status_closed != ParseStatus::Broken {
-            f_status_closed = w_status;
-        }
+        // union the workarounds so the flatten status (Sorted/Joined/...) is not
+        // overwritten by the closing status; Broken stays absorbing
+        f_status_closed = f_status_closed.combine(w_status);
         f_ways_closed.push(w_closed);
     }
     (f_ways_closed, f_status_closed)
@@ -666,5 +663,25 @@ mod tests {
         let (out, status) = way(1, Vec::new()).flatten_ways(50.0, true).unwrap();
         assert_eq!(status, ParseStatus::Broken);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn close_if_needed_keeps_the_flatten_status_for_an_already_closed_ring() {
+        // a ring rescued by sorting that is already closed must stay Sorted,
+        // not be downgraded to Ok by the closing step
+        let ring = vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001), n(1, 0.0, 0.0)];
+        let (out, status) = close_if_needed(vec![ring], ParseStatus::Sorted, 50.0, true);
+        assert_eq!(status, ParseStatus::Sorted);
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn close_if_needed_unions_sorted_flatten_with_a_joined_close() {
+        // sorted during flatten, then the ring ends had to be joined within
+        // tolerance -> both workarounds must be reported
+        let open_ring = vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001), n(3, 0.0, 0.0001)];
+        let (out, status) = close_if_needed(vec![open_ring], ParseStatus::Sorted, 50.0, true);
+        assert_eq!(status, ParseStatus::JoinedSorted);
+        assert_eq!(out[0][0], out[0][out[0].len() - 1]);
     }
 }
