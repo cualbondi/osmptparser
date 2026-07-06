@@ -1,17 +1,7 @@
 use serde_json::json;
 use std::collections::HashMap;
-use std::fmt;
 
 use super::parse_status::ParseStatus;
-
-#[derive(Debug)]
-pub struct ParseError;
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Error Parsing")
-    }
-}
-impl std::error::Error for ParseError {}
 
 /// OSM node representation with all the relevant osm data (tags and id)
 #[derive(Clone, Debug)]
@@ -107,7 +97,7 @@ fn edgedistance(w1: &Vec<Node>, w2: &Vec<Node>) -> f64 {
 /// to join segments into a single linestring
 /// - This is normal in openstreetmap format
 /// - Also ST_LineMerge() should do this already
-fn first_pass(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
+fn first_pass(ways: &Vec<Vec<Node>>) -> Vec<Vec<Node>> {
     // try to flatten by joining most ways as possible
     let n = ways.len();
     let mut ordered_ways = vec![ways[0].clone()];
@@ -145,7 +135,7 @@ fn first_pass(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
         }
     }
 
-    Ok(ordered_ways)
+    ordered_ways
 }
 
 /// move ways from one place to another to get the closest ones together
@@ -155,7 +145,7 @@ fn first_pass(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
 /// - Nevertheless I think this is also done by ST_LineMerge()
 ///
 /// TODO: this can probably be made with some std function like vec.sort(|nodesa, nodesb| edgedistance(nodesa, nodesb))
-fn sort_ways(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
+fn sort_ways(ways: &Vec<Vec<Node>>) -> Vec<Vec<Node>> {
     let mut ws = ways.to_owned();
     let mut sorted_ways = vec![ws[0].clone()];
     ws = ws[1..].to_vec();
@@ -173,7 +163,7 @@ fn sort_ways(ways: &Vec<Vec<Node>>) -> Result<Vec<Vec<Node>>, ()> {
         sorted_ways.push(ws[minidx].clone());
         ws.remove(minidx);
     }
-    Ok(sorted_ways)
+    sorted_ways
 }
 
 /// calculate haversine distance between two nodes
@@ -200,7 +190,7 @@ fn dist_haversine(p1: &Node, p2: &Node) -> f64 {
 /// - This is not "expected". We are trying to fix the way now
 /// - This is not done by ST_LineMerge()
 /// - I'm not sure if this conserves the direction from first to last
-fn join_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> Result<Vec<Vec<Node>>, ()> {
+fn join_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> Vec<Vec<Node>> {
     let mut joined = vec![ways[0].clone()];
     for w in ways[1..].iter().cloned() {
         let joined_len = joined.len();
@@ -223,34 +213,31 @@ fn join_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> Result<Vec<Vec<Node>>, ()
             joined.push(w);
         }
     }
-    Ok(joined)
+    joined
 }
 
-fn flatten_ways(
-    ways: &Vec<Vec<Node>>,
-    tolerance: f64,
-) -> Result<(Vec<Vec<Node>>, ParseStatus), ()> {
+fn flatten_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> (Vec<Vec<Node>>, ParseStatus) {
     if ways.is_empty() {
-        return Ok((Vec::new(), ParseStatus::Broken));
+        return (Vec::new(), ParseStatus::Broken);
     }
-    let passed = first_pass(ways)?;
+    let passed = first_pass(ways);
     if passed.len() == 1 {
-        return Ok((passed, ParseStatus::Ok));
+        return (passed, ParseStatus::Ok);
     }
-    let sorted = sort_ways(&passed)?;
-    let sorted_passed = first_pass(&sorted)?;
+    let sorted = sort_ways(&passed);
+    let sorted_passed = first_pass(&sorted);
     if sorted_passed.len() == 1 {
-        return Ok((sorted_passed, ParseStatus::Sorted));
+        return (sorted_passed, ParseStatus::Sorted);
     }
-    let joined = join_ways(&passed, tolerance)?;
+    let joined = join_ways(&passed, tolerance);
     if joined.len() == 1 {
-        return Ok((joined, ParseStatus::Joined));
+        return (joined, ParseStatus::Joined);
     }
-    let joined_sorted = join_ways(&sorted, tolerance)?;
+    let joined_sorted = join_ways(&sorted, tolerance);
     if joined_sorted.len() == 1 {
-        return Ok((joined_sorted, ParseStatus::JoinedSorted));
+        return (joined_sorted, ParseStatus::JoinedSorted);
     }
-    Ok((Vec::new(), ParseStatus::Broken))
+    (Vec::new(), ParseStatus::Broken)
 }
 
 /// close every linestring in `f_ways` when `closed` is requested and the flatten
@@ -267,7 +254,7 @@ fn close_if_needed(
     let mut f_ways_closed = Vec::new();
     let mut f_status_closed = f_status;
     for w in f_ways {
-        let (w_closed, w_status) = close_linestring(&w, tolerance).unwrap();
+        let (w_closed, w_status) = close_linestring(&w, tolerance);
         // union the workarounds so the flatten status (Sorted/Joined/...) is not
         // overwritten by the closing status; Broken stays absorbing
         f_status_closed = f_status_closed.combine(w_status);
@@ -278,18 +265,18 @@ fn close_if_needed(
 
 /// assert closedness of a linestring within a tolerance
 /// if it is not closed but in tolerance, close it
-fn close_linestring(way: &Vec<Node>, tolerance: f64) -> Result<(Vec<Node>, ParseStatus), ()> {
+fn close_linestring(way: &Vec<Node>, tolerance: f64) -> (Vec<Node>, ParseStatus) {
     let mut closed = way.to_owned();
     let mut closed_status = ParseStatus::Ok;
     if closed[0] == closed[closed.len() - 1] {
-        return Ok((closed, closed_status));
+        return (closed, closed_status);
     }
     if dist_haversine(&closed[0], &closed[closed.len() - 1]) <= tolerance {
         closed.push(closed[0].clone());
         closed_status = ParseStatus::Joined;
-        return Ok((closed, closed_status));
+        return (closed, closed_status);
     }
-    Ok((Vec::new(), ParseStatus::Broken))
+    (Vec::new(), ParseStatus::Broken)
 }
 
 impl Relation {
@@ -297,11 +284,7 @@ impl Relation {
     /// if `tolerance` is > 0, then it also join gaps in the ways into one linestring when possible
     /// `tolerance` is in meters
     /// param `closed` to assert that the linestring last first element is within tolerance to the first element
-    pub fn flatten_ways(
-        &self,
-        tolerance: f64,
-        closed: bool,
-    ) -> Result<(Vec<Vec<Node>>, ParseStatus), ParseError> {
+    pub fn flatten_ways(&self, tolerance: f64, closed: bool) -> (Vec<Vec<Node>>, ParseStatus) {
         // skip degenerate (empty) ways: on a clipped extract a way's nodes can
         // all fall outside the downloaded area, and an empty way would panic the
         // index-based joining in flatten_ways
@@ -311,10 +294,10 @@ impl Relation {
             .map(|w| w.nodes.clone())
             .filter(|nodes| !nodes.is_empty())
             .collect();
-        let (f_ways, f_status) = flatten_ways(&ways, tolerance).unwrap();
+        let (f_ways, f_status) = flatten_ways(&ways, tolerance);
 
         // check and close if needed
-        Ok(close_if_needed(f_ways, f_status, tolerance, closed))
+        close_if_needed(f_ways, f_status, tolerance, closed)
     }
 }
 
@@ -322,20 +305,16 @@ impl Way {
     /// best effort get a closed linestring from the nodes that compose this way
     /// if `tolerance` is > 0, then it also join gap in the way into one closed linestring when possible
     /// `tolerance` is in meters
-    pub fn flatten_ways(
-        &self,
-        tolerance: f64,
-        closed: bool,
-    ) -> Result<(Vec<Vec<Node>>, ParseStatus), ()> {
+    pub fn flatten_ways(&self, tolerance: f64, closed: bool) -> (Vec<Vec<Node>>, ParseStatus) {
         // skip a degenerate (empty) way: on a clipped extract the nodes can all
         // fall outside the downloaded area, which would panic the joining below
         let ways: Vec<Vec<Node>> = std::iter::once(self.nodes.clone())
             .filter(|nodes| !nodes.is_empty())
             .collect();
-        let (f_ways, f_status) = flatten_ways(&ways, tolerance).unwrap();
+        let (f_ways, f_status) = flatten_ways(&ways, tolerance);
 
         // check and close if needed
-        Ok(close_if_needed(f_ways, f_status, tolerance, closed))
+        close_if_needed(f_ways, f_status, tolerance, closed)
     }
 }
 
@@ -461,7 +440,7 @@ mod tests {
             vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)],
             vec![n(2, 0.0, 1.0), n(3, 0.0, 2.0)],
         ];
-        let out = first_pass(&ways).unwrap();
+        let out = first_pass(&ways);
         assert_eq!(out.len(), 1);
         assert_eq!(ids(&out[0]), vec![1, 2, 3]);
     }
@@ -473,7 +452,7 @@ mod tests {
             vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)],
             vec![n(3, 0.0, 2.0), n(2, 0.0, 1.0)],
         ];
-        let out = first_pass(&ways).unwrap();
+        let out = first_pass(&ways);
         assert_eq!(out.len(), 1);
         assert_eq!(ids(&out[0]), vec![1, 2, 3]);
     }
@@ -485,7 +464,7 @@ mod tests {
             vec![n(2, 0.0, 1.0), n(1, 0.0, 0.0)],
             vec![n(2, 0.0, 1.0), n(3, 0.0, 2.0)],
         ];
-        let out = first_pass(&ways).unwrap();
+        let out = first_pass(&ways);
         assert_eq!(out.len(), 1);
         assert_eq!(ids(&out[0]), vec![1, 2, 3]);
     }
@@ -496,7 +475,7 @@ mod tests {
             vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)],
             vec![n(3, 0.0, 5.0), n(4, 0.0, 6.0)],
         ];
-        let out = first_pass(&ways).unwrap();
+        let out = first_pass(&ways);
         assert_eq!(out.len(), 2);
     }
 
@@ -508,7 +487,7 @@ mod tests {
         let way0 = vec![n(10, 0.0, 0.0), n(11, 0.0, 1.0)];
         let way1 = vec![n(20, 0.0, 1.5), n(21, 0.0, 2.0)];
         let way2 = vec![n(30, 0.0, 10.0), n(31, 0.0, 11.0)];
-        let sorted = sort_ways(&vec![way0, way2, way1]).unwrap();
+        let sorted = sort_ways(&vec![way0, way2, way1]);
         assert_eq!(first_ids(&sorted), vec![10, 20, 30]);
     }
 
@@ -519,7 +498,7 @@ mod tests {
             vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001)],
             vec![n(3, 0.0, 0.0011), n(4, 0.0, 0.002)],
         ];
-        let joined = join_ways(&ways, 50.0).unwrap();
+        let joined = join_ways(&ways, 50.0);
         assert_eq!(joined.len(), 1);
         assert_eq!(ids(&joined[0]), vec![1, 2, 3, 4]);
     }
@@ -531,7 +510,7 @@ mod tests {
             vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001)],
             vec![n(3, 0.0, 0.002), n(4, 0.0, 0.0011)],
         ];
-        let joined = join_ways(&ways, 50.0).unwrap();
+        let joined = join_ways(&ways, 50.0);
         assert_eq!(joined.len(), 1);
         assert_eq!(ids(&joined[0]), vec![1, 2, 4, 3]);
     }
@@ -542,14 +521,14 @@ mod tests {
             vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001)],
             vec![n(3, 0.0, 0.0011), n(4, 0.0, 0.002)],
         ];
-        let joined = join_ways(&ways, 5.0).unwrap();
+        let joined = join_ways(&ways, 5.0);
         assert_eq!(joined.len(), 2);
     }
 
     #[test]
     fn close_linestring_leaves_already_closed_ring_untouched() {
         let way = vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001), n(1, 0.0, 0.0)];
-        let (closed, status) = close_linestring(&way, 50.0).unwrap();
+        let (closed, status) = close_linestring(&way, 50.0);
         assert_eq!(status, ParseStatus::Ok);
         assert_eq!(ids(&closed), vec![1, 2, 1]);
     }
@@ -558,7 +537,7 @@ mod tests {
     fn close_linestring_closes_a_ring_within_tolerance() {
         // last node is ~11 m from the first, closeable within 50 m
         let way = vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001), n(3, 0.0, 0.0001)];
-        let (closed, status) = close_linestring(&way, 50.0).unwrap();
+        let (closed, status) = close_linestring(&way, 50.0);
         assert_eq!(status, ParseStatus::Joined);
         assert_eq!(closed.len(), 4);
         assert_eq!(closed[0], closed[closed.len() - 1]);
@@ -567,14 +546,14 @@ mod tests {
     #[test]
     fn close_linestring_reports_broken_when_out_of_tolerance() {
         let way = vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)];
-        let (closed, status) = close_linestring(&way, 50.0).unwrap();
+        let (closed, status) = close_linestring(&way, 50.0);
         assert_eq!(status, ParseStatus::Broken);
         assert!(closed.is_empty());
     }
 
     #[test]
     fn flatten_ways_empty_is_broken() {
-        let (out, status) = flatten_ways(&Vec::new(), 50.0).unwrap();
+        let (out, status) = flatten_ways(&Vec::new(), 50.0);
         assert_eq!(status, ParseStatus::Broken);
         assert!(out.is_empty());
     }
@@ -585,7 +564,7 @@ mod tests {
             vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)],
             vec![n(2, 0.0, 1.0), n(3, 0.0, 2.0)],
         ];
-        let (out, status) = flatten_ways(&ways, 50.0).unwrap();
+        let (out, status) = flatten_ways(&ways, 50.0);
         assert_eq!(status, ParseStatus::Ok);
         assert_eq!(out.len(), 1);
         assert_eq!(ids(&out[0]), vec![1, 2, 3]);
@@ -597,7 +576,7 @@ mod tests {
             vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001)],
             vec![n(3, 0.0, 0.0011), n(4, 0.0, 0.002)],
         ];
-        let (out, status) = flatten_ways(&ways, 50.0).unwrap();
+        let (out, status) = flatten_ways(&ways, 50.0);
         assert_eq!(status, ParseStatus::Joined);
         assert_eq!(out.len(), 1);
     }
@@ -608,7 +587,7 @@ mod tests {
             vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)],
             vec![n(3, 0.0, 10.0), n(4, 0.0, 11.0)],
         ];
-        let (out, status) = flatten_ways(&ways, 50.0).unwrap();
+        let (out, status) = flatten_ways(&ways, 50.0);
         assert_eq!(status, ParseStatus::Broken);
         assert!(out.is_empty());
     }
@@ -637,7 +616,7 @@ mod tests {
             ],
             stops: Vec::new(),
         };
-        let (out, status) = rel.flatten_ways(50.0, false).unwrap();
+        let (out, status) = rel.flatten_ways(50.0, false);
         assert_eq!(status, ParseStatus::Ok);
         assert_eq!(out.len(), 1);
         assert_eq!(ids(&out[0]), vec![1, 2]);
@@ -652,7 +631,7 @@ mod tests {
             ways: vec![way(2, Vec::new())],
             stops: Vec::new(),
         };
-        let (out, status) = rel.flatten_ways(50.0, true).unwrap();
+        let (out, status) = rel.flatten_ways(50.0, true);
         assert_eq!(status, ParseStatus::Broken);
         assert!(out.is_empty());
     }
@@ -660,7 +639,7 @@ mod tests {
     #[test]
     fn way_flatten_ways_empty_is_broken_without_panic() {
         // closing an empty way used to panic on closed[0] in close_linestring
-        let (out, status) = way(1, Vec::new()).flatten_ways(50.0, true).unwrap();
+        let (out, status) = way(1, Vec::new()).flatten_ways(50.0, true);
         assert_eq!(status, ParseStatus::Broken);
         assert!(out.is_empty());
     }

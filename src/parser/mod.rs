@@ -534,7 +534,7 @@ impl Parser {
     pub fn get_public_transports(&self, gap: f64) -> Vec<PublicTransport> {
         self.par_map(&move |r| {
             // println!("{:?}",r.id);
-            let (f, s) = r.flatten_ways(gap, false).unwrap();
+            let (f, s) = r.flatten_ways(gap, false);
             PublicTransport {
                 id: r.id,
                 tags: r.tags.clone(),
@@ -610,7 +610,7 @@ impl Parser {
     /// It works in parallel using the same amount of threads that were configured on new()
     pub fn get_areas(&self, gap: f64) -> Vec<Area> {
         let relations_ways = self.par_map(&move |r| {
-            let (f, s) = r.flatten_ways(gap, true).unwrap();
+            let (f, s) = r.flatten_ways(gap, true);
             Area {
                 id: r.id,
                 id_type: 'r',
@@ -627,7 +627,7 @@ impl Parser {
         // iterates over all ways and creates a vector of areas
         let areas_ways = self.par_map_indexed(self.ways.len(), |index| {
             let way = self.get_way_at(index);
-            let (f, s) = way.flatten_ways(gap, true).unwrap();
+            let (f, s) = way.flatten_ways(gap, true);
             Area {
                 id: way.id,
                 id_type: 'w',
