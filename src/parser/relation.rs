@@ -305,7 +305,15 @@ impl Relation {
         tolerance: f64,
         closed: bool,
     ) -> Result<(Vec<Vec<Node>>, ParseStatus), ParseError> {
-        let ways: Vec<Vec<Node>> = self.ways.iter().map(|w| w.nodes.clone()).collect();
+        // skip degenerate (empty) ways: on a clipped extract a way's nodes can
+        // all fall outside the downloaded area, and an empty way would panic the
+        // index-based joining in flatten_ways
+        let ways: Vec<Vec<Node>> = self
+            .ways
+            .iter()
+            .map(|w| w.nodes.clone())
+            .filter(|nodes| !nodes.is_empty())
+            .collect();
         let (f_ways, f_status) = flatten_ways(&ways, tolerance).unwrap();
 
         // check and close if needed
@@ -322,7 +330,11 @@ impl Way {
         tolerance: f64,
         closed: bool,
     ) -> Result<(Vec<Vec<Node>>, ParseStatus), ()> {
-        let ways: Vec<Vec<Node>> = vec![self.nodes.clone()];
+        // skip a degenerate (empty) way: on a clipped extract the nodes can all
+        // fall outside the downloaded area, which would panic the joining below
+        let ways: Vec<Vec<Node>> = std::iter::once(self.nodes.clone())
+            .filter(|nodes| !nodes.is_empty())
+            .collect();
         let (f_ways, f_status) = flatten_ways(&ways, tolerance).unwrap();
 
         // check and close if needed
@@ -600,6 +612,58 @@ mod tests {
             vec![n(3, 0.0, 10.0), n(4, 0.0, 11.0)],
         ];
         let (out, status) = flatten_ways(&ways, 50.0).unwrap();
+        assert_eq!(status, ParseStatus::Broken);
+        assert!(out.is_empty());
+    }
+
+    /// build a way with the given nodes (tags/info irrelevant to geometry)
+    fn way(id: u64, nodes: Vec<Node>) -> Way {
+        Way {
+            id,
+            tags: HashMap::new(),
+            info: HashMap::new(),
+            nodes,
+        }
+    }
+
+    #[test]
+    fn relation_flatten_ways_skips_empty_ways_without_panic() {
+        // a clipped extract can leave a way with no nodes; it must be ignored,
+        // not panic the index-based joining pipeline
+        let rel = Relation {
+            id: 1,
+            tags: HashMap::new(),
+            info: HashMap::new(),
+            ways: vec![
+                way(2, Vec::new()),
+                way(1, vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)]),
+            ],
+            stops: Vec::new(),
+        };
+        let (out, status) = rel.flatten_ways(50.0, false).unwrap();
+        assert_eq!(status, ParseStatus::Ok);
+        assert_eq!(out.len(), 1);
+        assert_eq!(ids(&out[0]), vec![1, 2]);
+    }
+
+    #[test]
+    fn relation_flatten_ways_all_empty_is_broken() {
+        let rel = Relation {
+            id: 1,
+            tags: HashMap::new(),
+            info: HashMap::new(),
+            ways: vec![way(2, Vec::new())],
+            stops: Vec::new(),
+        };
+        let (out, status) = rel.flatten_ways(50.0, true).unwrap();
+        assert_eq!(status, ParseStatus::Broken);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn way_flatten_ways_empty_is_broken_without_panic() {
+        // closing an empty way used to panic on closed[0] in close_linestring
+        let (out, status) = way(1, Vec::new()).flatten_ways(50.0, true).unwrap();
         assert_eq!(status, ParseStatus::Broken);
         assert!(out.is_empty());
     }
