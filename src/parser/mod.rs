@@ -158,7 +158,7 @@ impl Parser {
     }
 
     /// creates internal cache by parsing public transport v2 from pbf file in the `pbf_filename` path, in parallel with `cpus` threads
-    pub fn new_ptv2(pbf_filename: &str, cpus: usize) -> Self {
+    pub fn new_ptv2(pbf_filename: &str, cpus: usize) -> io::Result<Self> {
         Self::new(
             pbf_filename,
             cpus,
@@ -168,7 +168,7 @@ impl Parser {
     }
 
     /// creates internal cache by parsing administrative areas from pbf file in the `pbf_filename` path, in parallel with `cpus` threads
-    pub fn new_aa(pbf_filename: &str, cpus: usize) -> Self {
+    pub fn new_aa(pbf_filename: &str, cpus: usize) -> io::Result<Self> {
         Self::new(
             pbf_filename,
             cpus,
@@ -184,7 +184,7 @@ impl Parser {
     ///     the relation must have the tag "tag_key" with value "tag_value"
     /// "tag_key=tag_value,tag_value2&tag_key2=tag_value3"
     ///     the relation must have the tag "tag_key" with value "tag_value" or "tag_value2" and the tag "tag_key2" with value "tag_value3"
-    pub fn new(pbf_filename: &str, cpus: usize, filters: String) -> Self {
+    pub fn new(pbf_filename: &str, cpus: usize, filters: String) -> io::Result<Self> {
         let mut relations = Vec::new() as Vec<RelationData>;
         let mut ways = Vec::new() as Vec<WayData>;
         let mut relations_ways = HashMap::default() as HashMap<u64, WayData>;
@@ -198,6 +198,8 @@ impl Parser {
         {
             eprint!("START Relations map, ");
             io::stderr().flush().unwrap();
+            let f = File::open(pbf_filename)?;
+            let mut reader = BlobReader::new(BufReader::new(f));
             let mut workers = Vec::with_capacity(cpus);
             for _ in 0..cpus {
                 let (req_tx, req_rx) = sync_channel(2);
@@ -284,9 +286,6 @@ impl Parser {
                 });
             }
 
-            let f = File::open(pbf_filename).unwrap();
-            let mut reader = BlobReader::new(BufReader::new(f));
-
             let mut w = 0;
             for blob in &mut reader {
                 let req_tx = &workers[w].0;
@@ -318,6 +317,8 @@ impl Parser {
         {
             eprint!("START Ways map, ");
             io::stderr().flush().unwrap();
+            let f = File::open(pbf_filename)?;
+            let mut reader = BlobReader::new(BufReader::new(f));
             let mut workers = Vec::with_capacity(cpus);
             for _ in 0..cpus {
                 let (req_tx, req_rx) = sync_channel(2);
@@ -414,9 +415,6 @@ impl Parser {
                 });
             }
 
-            let f = File::open(pbf_filename).unwrap();
-            let mut reader = BlobReader::new(BufReader::new(f));
-
             let mut w = 0;
             for blob in &mut reader {
                 let req_tx = &workers[w].0;
@@ -450,6 +448,8 @@ impl Parser {
         {
             eprint!("START Nodes map, ");
             io::stderr().flush().unwrap();
+            let f = File::open(pbf_filename)?;
+            let mut reader = BlobReader::new(BufReader::new(f));
             let mut workers = Vec::with_capacity(cpus);
             for _ in 0..cpus {
                 let (req_tx, req_rx) = sync_channel(2);
@@ -488,9 +488,6 @@ impl Parser {
                 });
             }
 
-            let f = File::open(pbf_filename).unwrap();
-            let mut reader = BlobReader::new(BufReader::new(f));
-
             let mut w = 0;
             for blob in &mut reader {
                 let req_tx = &workers[w].0;
@@ -511,13 +508,13 @@ impl Parser {
         } // local vars block
         eprintln!("found {}", nodes.len());
 
-        Parser {
+        Ok(Parser {
             relations,
             relations_ways,
             ways,
             nodes,
             cpus,
-        }
+        })
     }
 
     /// Builds a vector in parallel with all the public transport ways normalized and "fixed".

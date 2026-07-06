@@ -39,7 +39,7 @@ struct Cli {
     gap: f64,
 }
 
-fn main() {
+fn main() -> std::io::Result<()> {
     let args = Cli::from_args();
     let cpus = if args.cpus == 0 {
         num_cpus::get()
@@ -48,7 +48,7 @@ fn main() {
     };
     let input_filename = &args.filename.into_os_string().into_string().unwrap();
     if args.filter_ptv2 {
-        let parser = Parser::new_ptv2(input_filename, cpus);
+        let parser = Parser::new_ptv2(input_filename, cpus)?;
         println!("[");
         let mut first = true;
         for pt in parser.get_public_transports(args.gap) {
@@ -61,7 +61,7 @@ fn main() {
         }
         print!("]");
     } else {
-        let parser = Parser::new(input_filename, cpus, args.filter);
+        let parser = Parser::new(input_filename, cpus, args.filter)?;
         println!("[");
         let mut first = true;
         for area in parser.get_areas(args.gap) {
@@ -81,4 +81,5 @@ fn main() {
         println!();
         println!("]");
     }
+    Ok(())
 }

@@ -9,7 +9,8 @@ fn main() {
     let pbf_filename = pbf_filename_option.unwrap();
 
     let nthreads = num_cpus::get();
-    let parser = Parser::new(&pbf_filename, nthreads, "natural=beach".to_string());
+    let parser = Parser::new(&pbf_filename, nthreads, "natural=beach".to_string())
+        .expect("could not open/parse pbf file");
     // let parser = Parser::new_aa(&pbf_filename, nthreads);
 
     let mut accum = 0usize;
