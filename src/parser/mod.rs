@@ -45,6 +45,24 @@ struct RelationData {
 type WayIdsSet = HashSet<u64>;
 type NodeIdsSet = HashSet<u64>;
 
+/// One accepted value of a filter condition (the part after `=`, split by `,`)
+struct ConditionValue {
+    /// whether this value was negated with a leading `!`
+    negated: bool,
+    /// value to compare against (without the leading `!`)
+    value: String,
+}
+
+/// A single parsed filter condition (one segment between `&`)
+struct Condition {
+    /// tag key to look up (keeps a leading `!` when the key is negated)
+    key: String,
+    /// whether the key was negated with a leading `!`
+    key_negated: bool,
+    /// accepted values (after `=`); `None` when the condition only checks key presence/absence
+    values: Option<Vec<ConditionValue>>,
+}
+
 struct MessageRelations {
     relations: Vec<RelationData>,
     stop_ids: NodeIdsSet,
@@ -81,36 +99,59 @@ pub struct ParserRelationIterator {
 /// Main class, it parses the pbf file on new() and maintains an internal cache
 /// of relations / ways / nodes, to build on the fly PublicTransport representations
 impl Parser {
-    /// generic check using a filter of tag_conditions with the following format
+    /// parse a filter string into conditions once, so it is not re-parsed for every element.
+    /// format of tag_conditions:
     /// "tag_key" (has the tag with any value)
     /// "!tag_key" (does not have the tag)
     /// "tag_key=tag_value" (equality with one value)
     /// "tag_key=!tag_value" (negation)
     /// "tag_key=tag_value,tag_value2&tag_key2=tag_value3" (comma means OR, & means AND)
     /// "tag_key=!tag_value,!tag_value2&tag_key2=tag_value3" (negation works with individual values)
-    fn filter_relation(relation: &osm_pbf_iter::Relation, conditions: &String) -> bool {
-        for condition in conditions.split('&') {
-            let mut condition_split = condition.split('=');
-            let condition_key = condition_split.next().unwrap().to_string();
-            let condition_values = condition_split.next();
-            let tag = relation.tags().find(|&kv| kv.0 == condition_key);
-            if (condition_key.starts_with('!') && tag.is_some())
-                || (!condition_key.starts_with('!') && tag.is_none())
+    fn parse_filters(filters: &str) -> Vec<Condition> {
+        filters
+            .split('&')
+            .map(|condition| {
+                let mut condition_split = condition.split('=');
+                let key = condition_split.next().unwrap().to_string();
+                let key_negated = key.starts_with('!');
+                let values = condition_split.next().map(|values| {
+                    values
+                        .split(',')
+                        .map(|value| match value.strip_prefix('!') {
+                            Some(stripped) => ConditionValue {
+                                negated: true,
+                                value: stripped.to_string(),
+                            },
+                            None => ConditionValue {
+                                negated: false,
+                                value: value.to_string(),
+                            },
+                        })
+                        .collect()
+                });
+                Condition {
+                    key,
+                    key_negated,
+                    values,
+                }
+            })
+            .collect()
+    }
+
+    /// check a relation against pre-parsed filter conditions (see `parse_filters`)
+    fn filter_relation(relation: &osm_pbf_iter::Relation, conditions: &[Condition]) -> bool {
+        for condition in conditions {
+            let tag = relation.tags().find(|&kv| kv.0 == condition.key);
+            if (condition.key_negated && tag.is_some()) || (!condition.key_negated && tag.is_none())
             {
                 return false;
-            } else if condition_values.is_some() {
+            }
+            if let Some(values) = &condition.values {
                 let tag_value = tag.unwrap().1;
-                let condition_values_string = condition_values.unwrap().to_string();
-                let condition_values_split = condition_values_string.split(',');
-                let mut found = false;
-                for condition_value in condition_values_split {
-                    if (condition_value.starts_with('!') && tag_value != &condition_value[1..])
-                        || (!condition_value.starts_with('!') && tag_value == condition_value)
-                    {
-                        found = true;
-                        break;
-                    }
-                }
+                let found = values.iter().any(|cv| {
+                    (cv.negated && tag_value != cv.value.as_str())
+                        || (!cv.negated && tag_value == cv.value.as_str())
+                });
                 if !found {
                     return false;
                 }
@@ -119,36 +160,20 @@ impl Parser {
         true
     }
 
-    /// generic check using a filter of tag_conditions with the following format
-    /// "tag_key" (has the tag with any value)
-    /// "!tag_key" (does not have the tag)
-    /// "tag_key=tag_value" (equality with one value)
-    /// "tag_key=!tag_value" (negation)
-    /// "tag_key=tag_value,tag_value2&tag_key2=tag_value3" (comma means OR, & means AND)
-    /// "tag_key=!tag_value,!tag_value2&tag_key2=tag_value3" (negation works with individual values)
-    fn filter_way(way: &osm_pbf_iter::Way, conditions: &String) -> bool {
-        for condition in conditions.split('&') {
-            let mut condition_split = condition.split('=');
-            let condition_key = condition_split.next().unwrap().to_string();
-            let condition_values = condition_split.next();
-            let tag = way.tags().find(|&kv| kv.0 == condition_key);
-            if (condition_key.starts_with('!') && tag.is_some())
-                || (!condition_key.starts_with('!') && tag.is_none())
+    /// check a way against pre-parsed filter conditions (see `parse_filters`)
+    fn filter_way(way: &osm_pbf_iter::Way, conditions: &[Condition]) -> bool {
+        for condition in conditions {
+            let tag = way.tags().find(|&kv| kv.0 == condition.key);
+            if (condition.key_negated && tag.is_some()) || (!condition.key_negated && tag.is_none())
             {
                 return false;
-            } else if condition_values.is_some() {
+            }
+            if let Some(values) = &condition.values {
                 let tag_value = tag.unwrap().1;
-                let condition_values_string = condition_values.unwrap().to_string();
-                let condition_values_split = condition_values_string.split(',');
-                let mut found = false;
-                for condition_value in condition_values_split {
-                    if (condition_value.starts_with('!') && tag_value != &condition_value[1..])
-                        || (!condition_value.starts_with('!') && tag_value == condition_value)
-                    {
-                        found = true;
-                        break;
-                    }
-                }
+                let found = values.iter().any(|cv| {
+                    (cv.negated && tag_value != cv.value.as_str())
+                        || (!cv.negated && tag_value == cv.value.as_str())
+                });
                 if !found {
                     return false;
                 }
@@ -191,7 +216,7 @@ impl Parser {
         let mut nodes = HashMap::default() as HashMap<u64, NodeData>;
         let way_ids = Arc::new(RwLock::new(HashSet::default() as WayIdsSet));
         let node_ids = Arc::new(RwLock::new(HashSet::default() as NodeIdsSet));
-        let filters_arc = Arc::new(filters);
+        let filters_arc = Arc::new(Self::parse_filters(&filters));
         /*
             pbf relations collect
         */
