@@ -6,6 +6,7 @@ Bugfix and test coverage
  - Fixed: `edgedistance`, `sort_ways` did not actually sort ways by proximity.
  - Added: unit tests pinning the geometry functions (pointdistance, dist_haversine, edgedistance, first_pass, sort_ways, join_ways, close_linestring, flatten_ways).
  - Fixed: `Debug for Parser` panicked on relations without a `name` tag.
+ - Changed: `Parser::get_relation_from_id` now takes `&self` instead of consuming the `Parser`.
 
 ## v2.2.0
 
