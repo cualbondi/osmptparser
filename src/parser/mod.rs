@@ -557,8 +557,20 @@ impl Parser {
         F: Fn(Relation) -> R + Sync + Send + Clone + 'static,
         R: Send + 'static,
     {
+        self.par_map_indexed(self.relations.len(), |index| {
+            func(self.get_relation_at(index))
+        })
+    }
+
+    /// Parallel scaffold shared by `par_map` (relations) and `get_areas` (ways):
+    /// hands out indices `0..length` across the configured worker threads,
+    /// applies `process` to each, and collects the results into a vector.
+    fn par_map_indexed<R, P>(&self, length: usize, process: P) -> Vec<R>
+    where
+        P: Fn(usize) -> R + Sync + Send + Clone,
+        R: Send,
+    {
         let cpus = self.cpus;
-        let length = self.relations.len();
         let mut workers = Vec::with_capacity(cpus);
         let index = Arc::new(RwLock::new(AtomicUsize::new(0)));
         crossbeam::scope(|s| {
@@ -566,6 +578,7 @@ impl Parser {
                 let (res_tx, res_rx) = sync_channel(200);
                 workers.push(res_rx);
                 let index_local = index.clone();
+                let process = process.clone();
                 s.spawn(move |_| loop {
                     let index;
                     {
@@ -575,25 +588,24 @@ impl Parser {
                     if index >= length {
                         break;
                     }
-                    let relation = self.get_relation_at(index);
-                    let processed = func(relation);
+                    let processed = process(index);
                     res_tx.send(processed).unwrap();
                 });
             }
 
             // reduce / join all data from workers into one structure
-            let mut relations = Vec::with_capacity(length);
+            let mut results = Vec::with_capacity(length);
             let mut errors = 0;
             while errors < cpus {
                 errors = 0;
                 for res_rx in workers.iter() {
                     match res_rx.recv() {
-                        Ok(worker_data) => relations.push(worker_data),
+                        Ok(worker_data) => results.push(worker_data),
                         Err(_) => errors += 1,
                     };
                 }
             }
-            relations
+            results
         })
         .unwrap()
     }
@@ -616,58 +628,22 @@ impl Parser {
             }
         });
 
-        // iterates over all ways (par_map_ways) and creates a vector of areas
-        let cpus = self.cpus;
-        let length = self.ways.len();
-        let mut workers = Vec::with_capacity(cpus);
-        let index = Arc::new(RwLock::new(AtomicUsize::new(0)));
-        let areas_ways = crossbeam::scope(|s| {
-            for _ in 0..cpus {
-                let (res_tx, res_rx) = sync_channel(200);
-                workers.push(res_rx);
-                let index_local = index.clone();
-                s.spawn(move |_| loop {
-                    let index;
-                    {
-                        let index_write = index_local.write().unwrap();
-                        index = index_write.fetch_add(1, Ordering::SeqCst);
-                    }
-                    if index >= length {
-                        break;
-                    }
-                    let way = self.get_way_at(index);
-                    let (f, s) = way.flatten_ways(gap, true).unwrap();
-                    let area = Area {
-                        id: way.id,
-                        id_type: 'w',
-                        tags: way.tags,
-                        info: way.info,
-                        geometry: f
-                            .iter()
-                            .map(|v| v.iter().map(|n| (n.lon, n.lat)).collect())
-                            .collect(),
-                        parse_status: s,
-                    };
-                    // println!("{:?}", area);
-                    res_tx.send(area).unwrap();
-                });
+        // iterates over all ways and creates a vector of areas
+        let areas_ways = self.par_map_indexed(self.ways.len(), |index| {
+            let way = self.get_way_at(index);
+            let (f, s) = way.flatten_ways(gap, true).unwrap();
+            Area {
+                id: way.id,
+                id_type: 'w',
+                tags: way.tags,
+                info: way.info,
+                geometry: f
+                    .iter()
+                    .map(|v| v.iter().map(|n| (n.lon, n.lat)).collect())
+                    .collect(),
+                parse_status: s,
             }
-
-            // reduce / join all data from workers into one structure
-            let mut ways = Vec::with_capacity(length);
-            let mut errors = 0;
-            while errors < cpus {
-                errors = 0;
-                for res_rx in workers.iter() {
-                    match res_rx.recv() {
-                        Ok(worker_data) => ways.push(worker_data),
-                        Err(_) => errors += 1,
-                    };
-                }
-            }
-            ways
-        })
-        .unwrap();
+        });
 
         // returns relations_ways + areas_ways
         relations_ways.into_iter().chain(areas_ways).collect()

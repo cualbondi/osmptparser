@@ -10,6 +10,7 @@ Bugfix and test coverage
  - Changed: filter string is now parsed once into conditions instead of being re-parsed for every relation and way.
  - Changed: merged the near-identical `filter_relation` and `filter_way` into a single `matches_conditions` helper.
  - Refactored: extracted the shared close-linestring loop from `Relation::flatten_ways` and `Way::flatten_ways` into a `close_if_needed` helper.
+ - Refactored: deduplicated the parallel worker/reduce scaffold; `get_areas` and `par_map` now share the private `par_map_indexed` helper (no behavior change).
 
 ## v2.2.0
 
