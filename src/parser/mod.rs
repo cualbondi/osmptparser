@@ -596,6 +596,20 @@ impl Parser {
         Some(self.get_relation_from(rel))
     }
 
+    /// Builds the Nodes for the given ids that exist in the internal cache, preserving order
+    fn build_nodes(&self, ids: &[u64]) -> Vec<Node> {
+        ids.iter()
+            .filter_map(|nid| {
+                self.nodes.get(nid).map(|node| Node {
+                    id: *nid,
+                    tags: node.tags.clone(),
+                    lat: node.lat,
+                    lon: node.lon,
+                })
+            })
+            .collect()
+    }
+
     /// Builds the Relation providing relationdata internal cache
     fn get_relation_from(&self, relation_data: &RelationData) -> Relation {
         Relation {
@@ -610,30 +624,10 @@ impl Parser {
                     id: *wid,
                     tags: self.relations_ways[wid].tags.clone(),
                     info: self.relations_ways[wid].info.clone(),
-                    nodes: self.relations_ways[wid]
-                        .nodes
-                        .iter()
-                        .filter(|nid| self.nodes.contains_key(nid))
-                        .map(|nid| Node {
-                            id: *nid,
-                            tags: self.nodes[nid].tags.clone(),
-                            lat: self.nodes[nid].lat,
-                            lon: self.nodes[nid].lon,
-                        })
-                        .collect(),
+                    nodes: self.build_nodes(&self.relations_ways[wid].nodes),
                 })
                 .collect(),
-            stops: relation_data
-                .stops
-                .iter()
-                .filter(|nid| self.nodes.contains_key(nid))
-                .map(|nid| Node {
-                    id: *nid,
-                    tags: self.nodes[nid].tags.clone(),
-                    lat: self.nodes[nid].lat,
-                    lon: self.nodes[nid].lon,
-                })
-                .collect(),
+            stops: self.build_nodes(&relation_data.stops),
         }
     }
 
@@ -643,17 +637,7 @@ impl Parser {
             id: way_data.id,
             tags: way_data.tags.clone(),
             info: way_data.info.clone(),
-            nodes: way_data
-                .nodes
-                .iter()
-                .filter(|nid| self.nodes.contains_key(nid))
-                .map(|nid| Node {
-                    id: *nid,
-                    tags: self.nodes[nid].tags.clone(),
-                    lat: self.nodes[nid].lat,
-                    lon: self.nodes[nid].lon,
-                })
-                .collect(),
+            nodes: self.build_nodes(&way_data.nodes),
         }
     }
 
