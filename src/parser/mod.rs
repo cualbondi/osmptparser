@@ -63,18 +63,21 @@ struct Condition {
     values: Option<Vec<ConditionValue>>,
 }
 
+#[derive(Default)]
 struct MessageRelations {
     relations: Vec<RelationData>,
     stop_ids: NodeIdsSet,
     way_ids: WayIdsSet,
 }
 
+#[derive(Default)]
 struct MessageWays {
     ways: Vec<WayData>,
     relations_ways: HashMap<u64, WayData>,
     node_ids: NodeIdsSet,
 }
 
+#[derive(Default)]
 struct MessageNodes {
     nodes: HashMap<u64, NodeData>,
 }
@@ -193,6 +196,62 @@ impl Parser {
         map
     }
 
+    /// Streams `pbf_filename`, dispatching its blobs round-robin across `cpus` worker
+    /// threads. Each worker folds the blobs it receives into a per-worker `S` (starting
+    /// from `S::default()`) by calling `process` once per blob with the decompressed
+    /// bytes, and the per-worker states are returned for the caller to reduce.
+    /// `label` is only used for the progress line printed to stderr.
+    fn collect_from_pbf<S, P>(
+        label: &str,
+        pbf_filename: &str,
+        cpus: usize,
+        process: P,
+    ) -> io::Result<Vec<S>>
+    where
+        S: Default + Send + 'static,
+        P: Fn(&mut S, &[u8]) + Send + Sync + Clone + 'static,
+    {
+        eprint!("START {} map, ", label);
+        io::stderr().flush().unwrap();
+
+        let f = File::open(pbf_filename)?;
+        let mut reader = BlobReader::new(BufReader::new(f));
+
+        let mut workers = Vec::with_capacity(cpus);
+        for _ in 0..cpus {
+            let (req_tx, req_rx) = sync_channel::<Blob>(2);
+            let (res_tx, res_rx) = sync_channel::<S>(0);
+            workers.push((req_tx, res_rx));
+            let process = process.clone();
+            thread::spawn(move || {
+                let mut state = S::default();
+                while let Ok(blob) = req_rx.recv() {
+                    let data = (blob as Blob).into_data();
+                    process(&mut state, &data);
+                }
+                res_tx.send(state).unwrap();
+            });
+        }
+
+        let mut w = 0;
+        for blob in &mut reader {
+            let req_tx = &workers[w].0;
+            w = (w + 1) % cpus;
+            req_tx.send(blob).unwrap();
+        }
+
+        eprint!("reduce, ");
+        io::stderr().flush().unwrap();
+
+        // drop each request sender so its worker's recv loop ends, then collect its state
+        let mut results = Vec::with_capacity(cpus);
+        for (req_tx, res_rx) in workers.into_iter() {
+            drop(req_tx);
+            results.push(res_rx.recv().unwrap());
+        }
+        Ok(results)
+    }
+
     /// creates internal cache by parsing public transport v2 from pbf file in the `pbf_filename` path, in parallel with `cpus` threads
     pub fn new_ptv2(pbf_filename: &str, cpus: usize) -> io::Result<Self> {
         Self::new(
@@ -228,99 +287,66 @@ impl Parser {
         let way_ids = Arc::new(RwLock::new(HashSet::default() as WayIdsSet));
         let node_ids = Arc::new(RwLock::new(HashSet::default() as NodeIdsSet));
         let filters_arc = Arc::new(Self::parse_filters(&filters));
+
         /*
             pbf relations collect
         */
         {
-            eprint!("START Relations map, ");
-            io::stderr().flush().unwrap();
-            let f = File::open(pbf_filename)?;
-            let mut reader = BlobReader::new(BufReader::new(f));
-            let mut workers = Vec::with_capacity(cpus);
-            for _ in 0..cpus {
-                let (req_tx, req_rx) = sync_channel(2);
-                let (res_tx, res_rx) = sync_channel(0);
-                workers.push((req_tx, res_rx));
-                let filters_local = filters_arc.clone();
-                thread::spawn(move || {
-                    let mut relations = Vec::new() as Vec<RelationData>;
-                    let mut stop_ids = HashSet::default() as NodeIdsSet;
-                    let mut way_ids = HashSet::default() as WayIdsSet;
-
-                    while let Ok(blob) = req_rx.recv() {
-                        let data = (blob as Blob).into_data();
-                        let primitive_block = PrimitiveBlock::parse(&data);
-                        for primitive in primitive_block.primitives() {
-                            if let Primitive::Relation(relation) = primitive {
-                                if Self::matches_conditions(
-                                    || relation.tags(),
-                                    filters_local.as_ref(),
-                                ) {
-                                    let info = Self::info_map(relation.info.as_ref());
-                                    // condicion para saber si esta relation es un public transport
-                                    let mut rd = RelationData {
-                                        id: relation.id,
-                                        tags: relation
-                                            .tags()
-                                            .map(|t| (t.0.to_string(), t.1.to_string()))
-                                            .collect(),
-                                        info,
-                                        ways: Vec::new(),
-                                        stops: Vec::new(),
-                                    };
-                                    for member in relation.members() {
-                                        // member = (role: &str, id: u64, type: RelationMemberType)
-                                        if member.2 == RelationMemberType::Way {
-                                            rd.ways.push(member.1);
-                                            way_ids.insert(member.1);
-                                        }
-                                        if member.2 == RelationMemberType::Node {
-                                            rd.stops.push(member.1);
-                                            stop_ids.insert(member.1);
-                                        }
+            let filters_local = filters_arc.clone();
+            let worker_results = Self::collect_from_pbf(
+                "Relations",
+                pbf_filename,
+                cpus,
+                move |state: &mut MessageRelations, data: &[u8]| {
+                    let primitive_block = PrimitiveBlock::parse(data);
+                    for primitive in primitive_block.primitives() {
+                        if let Primitive::Relation(relation) = primitive {
+                            if Self::matches_conditions(|| relation.tags(), filters_local.as_ref())
+                            {
+                                let info = Self::info_map(relation.info.as_ref());
+                                // condicion para saber si esta relation es un public transport
+                                let mut rd = RelationData {
+                                    id: relation.id,
+                                    tags: relation
+                                        .tags()
+                                        .map(|t| (t.0.to_string(), t.1.to_string()))
+                                        .collect(),
+                                    info,
+                                    ways: Vec::new(),
+                                    stops: Vec::new(),
+                                };
+                                for member in relation.members() {
+                                    // member = (role: &str, id: u64, type: RelationMemberType)
+                                    if member.2 == RelationMemberType::Way {
+                                        rd.ways.push(member.1);
+                                        state.way_ids.insert(member.1);
                                     }
-                                    if !rd.ways.is_empty() {
-                                        relations.push(rd);
-                                    } else {
-                                        // println!("WARNING: relation has no ways 'https://www.openstreetmap.org/relation/{:?}'", relation.id);
+                                    if member.2 == RelationMemberType::Node {
+                                        rd.stops.push(member.1);
+                                        state.stop_ids.insert(member.1);
                                     }
+                                }
+                                if !rd.ways.is_empty() {
+                                    state.relations.push(rd);
+                                } else {
+                                    // println!("WARNING: relation has no ways 'https://www.openstreetmap.org/relation/{:?}'", relation.id);
                                 }
                             }
                         }
                     }
+                },
+            )?;
 
-                    res_tx
-                        .send(MessageRelations {
-                            relations,
-                            stop_ids,
-                            way_ids,
-                        })
-                        .unwrap();
-                });
-            }
-
-            let mut w = 0;
-            for blob in &mut reader {
-                let req_tx = &workers[w].0;
-                w = (w + 1) % cpus;
-                req_tx.send(blob).unwrap();
-            }
-
-            eprint!("reduce, ");
-            io::stderr().flush().unwrap();
             // reduce / join all data from workers into one structure
-            {
-                // write lock
-                let mut node_ids_write = node_ids.write().unwrap();
-                let mut way_ids_write = way_ids.write().unwrap();
-                for (req_tx, res_rx) in workers.into_iter() {
-                    drop(req_tx);
-                    let worker_data = res_rx.recv().unwrap();
-                    relations.extend(worker_data.relations);
-                    node_ids_write.extend(worker_data.stop_ids);
-                    way_ids_write.extend(worker_data.way_ids);
-                }
-            } // write lock
+            let mut node_ids_write = node_ids.write().unwrap();
+            let mut way_ids_write = way_ids.write().unwrap();
+            for worker_data in worker_results {
+                relations.extend(worker_data.relations);
+                node_ids_write.extend(worker_data.stop_ids);
+                way_ids_write.extend(worker_data.way_ids);
+            }
+            drop(node_ids_write);
+            drop(way_ids_write);
             eprintln!("found {}", relations.len());
         }
 
@@ -328,100 +354,69 @@ impl Parser {
             pbf ways collect
         */
         {
-            eprint!("START Ways map, ");
-            io::stderr().flush().unwrap();
-            let f = File::open(pbf_filename)?;
-            let mut reader = BlobReader::new(BufReader::new(f));
-            let mut workers = Vec::with_capacity(cpus);
-            for _ in 0..cpus {
-                let (req_tx, req_rx) = sync_channel(2);
-                let (res_tx, res_rx) = sync_channel(0);
-                workers.push((req_tx, res_rx));
-                let way_ids_local = way_ids.clone();
-                let filters_local = filters_arc.clone();
-                thread::spawn(move || {
-                    let mut ways = Vec::new() as Vec<WayData>;
-                    let mut relations_ways = HashMap::default() as HashMap<u64, WayData>;
-                    let mut node_ids = HashSet::default() as NodeIdsSet;
-                    let way_ids_read = way_ids_local.read().unwrap();
-                    while let Ok(blob) = req_rx.recv() {
-                        let blob = (blob as Blob).into_data();
-                        let primitive_block = PrimitiveBlock::parse(&blob);
-                        for primitive in primitive_block.primitives() {
-                            if let Primitive::Way(way) = primitive {
-                                // relations_ways, collect ways that are part of relations previously found
-                                if way_ids_read.contains(&way.id) {
-                                    for node in way.refs() {
-                                        node_ids.insert(node as u64);
-                                    }
-                                    relations_ways.insert(
-                                        way.id,
-                                        WayData {
-                                            id: way.id,
-                                            tags: way
-                                                .tags()
-                                                .map(|t| (t.0.to_string(), t.1.to_string()))
-                                                .collect(),
-                                            info: HashMap::new(),
-                                            nodes: way.refs().map(|id| id as u64).collect(),
-                                        },
-                                    );
+            let filters_local = filters_arc.clone();
+            let way_ids_reader = way_ids.clone();
+            let worker_results = Self::collect_from_pbf(
+                "Ways",
+                pbf_filename,
+                cpus,
+                move |state: &mut MessageWays, data: &[u8]| {
+                    let way_ids_read = way_ids_reader.read().unwrap();
+                    let primitive_block = PrimitiveBlock::parse(data);
+                    for primitive in primitive_block.primitives() {
+                        if let Primitive::Way(way) = primitive {
+                            // relations_ways, collect ways that are part of relations previously found
+                            if way_ids_read.contains(&way.id) {
+                                for node in way.refs() {
+                                    state.node_ids.insert(node as u64);
                                 }
-                                // ways, collect ways that are not part of relations previously found but conform to filters
-                                if Self::matches_conditions(|| way.tags(), filters_local.as_ref()) {
-                                    let info = Self::info_map(way.info.as_ref());
-                                    let wd = WayData {
+                                state.relations_ways.insert(
+                                    way.id,
+                                    WayData {
                                         id: way.id,
                                         tags: way
                                             .tags()
                                             .map(|t| (t.0.to_string(), t.1.to_string()))
                                             .collect(),
-                                        info,
+                                        info: HashMap::new(),
                                         nodes: way.refs().map(|id| id as u64).collect(),
-                                    };
-                                    if !wd.nodes.is_empty() {
-                                        for node in way.refs() {
-                                            node_ids.insert(node as u64);
-                                        }
-                                        ways.push(wd);
-                                    } else {
-                                        // println!("WARNING: way has no nodes 'https://www.openstreetmap.org/way/{:?}'", way.id);
+                                    },
+                                );
+                            }
+                            // ways, collect ways that are not part of relations previously found but conform to filters
+                            if Self::matches_conditions(|| way.tags(), filters_local.as_ref()) {
+                                let info = Self::info_map(way.info.as_ref());
+                                let wd = WayData {
+                                    id: way.id,
+                                    tags: way
+                                        .tags()
+                                        .map(|t| (t.0.to_string(), t.1.to_string()))
+                                        .collect(),
+                                    info,
+                                    nodes: way.refs().map(|id| id as u64).collect(),
+                                };
+                                if !wd.nodes.is_empty() {
+                                    for node in way.refs() {
+                                        state.node_ids.insert(node as u64);
                                     }
+                                    state.ways.push(wd);
+                                } else {
+                                    // println!("WARNING: way has no nodes 'https://www.openstreetmap.org/way/{:?}'", way.id);
                                 }
                             }
                         }
                     }
+                },
+            )?;
 
-                    res_tx
-                        .send(MessageWays {
-                            ways,
-                            relations_ways,
-                            node_ids,
-                        })
-                        .unwrap();
-                });
-            }
-
-            let mut w = 0;
-            for blob in &mut reader {
-                let req_tx = &workers[w].0;
-                w = (w + 1) % cpus;
-                req_tx.send(blob).unwrap();
-            }
-
-            eprint!("reduce, ");
-            io::stderr().flush().unwrap();
             // reduce / join all data from workers into one structure
-            {
-                let mut node_ids_write = node_ids.write().unwrap();
-                for (req_tx, res_rx) in workers.into_iter() {
-                    drop(req_tx);
-                    let worker_data = res_rx.recv().unwrap();
-                    ways.extend(worker_data.ways);
-                    relations_ways.extend(worker_data.relations_ways);
-                    node_ids_write.extend(worker_data.node_ids);
-                }
-            } // write lock
+            let mut node_ids_write = node_ids.write().unwrap();
+            for worker_data in worker_results {
+                ways.extend(worker_data.ways);
+                relations_ways.extend(worker_data.relations_ways);
+                node_ids_write.extend(worker_data.node_ids);
+            }
+            drop(node_ids_write);
             eprintln!(
                 "found {} for relations +{} new",
                 relations_ways.len(),
@@ -433,66 +428,41 @@ impl Parser {
             pbf nodes collect
         */
         {
-            eprint!("START Nodes map, ");
-            io::stderr().flush().unwrap();
-            let f = File::open(pbf_filename)?;
-            let mut reader = BlobReader::new(BufReader::new(f));
-            let mut workers = Vec::with_capacity(cpus);
-            for _ in 0..cpus {
-                let (req_tx, req_rx) = sync_channel(2);
-                let (res_tx, res_rx) = sync_channel(0);
-                workers.push((req_tx, res_rx));
-                let node_ids_local = node_ids.clone();
-                thread::spawn(move || {
-                    // nodes_parser_worker(req_rx, res_tx);
-                    let node_ids_read = node_ids_local.read().unwrap();
-                    let mut nodes = HashMap::default() as HashMap<u64, NodeData>;
-                    while let Ok(blob) = req_rx.recv() {
-                        let blob = (blob as Blob).into_data();
-                        let primitive_block = PrimitiveBlock::parse(&blob);
-                        for primitive in primitive_block.primitives() {
-                            if let Primitive::Node(node) = primitive {
-                                if node_ids_read.contains(&node.id) {
-                                    nodes.insert(
-                                        node.id,
-                                        NodeData {
-                                            // id: node.id,
-                                            tags: node
-                                                .tags
-                                                .into_iter()
-                                                .map(|t| (t.0.to_string(), t.1.to_string()))
-                                                .collect(),
-                                            lat: node.lat,
-                                            lon: node.lon,
-                                        },
-                                    );
-                                }
+            let node_ids_reader = node_ids.clone();
+            let worker_results = Self::collect_from_pbf(
+                "Nodes",
+                pbf_filename,
+                cpus,
+                move |state: &mut MessageNodes, data: &[u8]| {
+                    let node_ids_read = node_ids_reader.read().unwrap();
+                    let primitive_block = PrimitiveBlock::parse(data);
+                    for primitive in primitive_block.primitives() {
+                        if let Primitive::Node(node) = primitive {
+                            if node_ids_read.contains(&node.id) {
+                                state.nodes.insert(
+                                    node.id,
+                                    NodeData {
+                                        // id: node.id,
+                                        tags: node
+                                            .tags
+                                            .into_iter()
+                                            .map(|t| (t.0.to_string(), t.1.to_string()))
+                                            .collect(),
+                                        lat: node.lat,
+                                        lon: node.lon,
+                                    },
+                                );
                             }
                         }
                     }
+                },
+            )?;
 
-                    res_tx.send(MessageNodes { nodes }).unwrap();
-                });
-            }
-
-            let mut w = 0;
-            for blob in &mut reader {
-                let req_tx = &workers[w].0;
-                w = (w + 1) % cpus;
-                req_tx.send(blob).unwrap();
-            }
-
-            eprint!("reduce, ");
-            io::stderr().flush().unwrap();
             // reduce / join all data from workers into one structure
-            {
-                for (req_tx, res_rx) in workers.into_iter() {
-                    drop(req_tx);
-                    let worker_data = res_rx.recv().unwrap();
-                    nodes.extend(worker_data.nodes);
-                }
-            } // write lock
-        } // local vars block
+            for worker_data in worker_results {
+                nodes.extend(worker_data.nodes);
+            }
+        }
         eprintln!("found {}", nodes.len());
 
         Ok(Parser {

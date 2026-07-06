@@ -12,6 +12,7 @@ Bugfix and test coverage
  - Added: unit tests pinning the geometry functions (pointdistance, dist_haversine, edgedistance, first_pass, sort_ways, join_ways, close_linestring, flatten_ways).
  - Fixed: `Debug for Parser` panicked on relations without a `name` tag.
  - Internal: dropped the redundant `RwLock` around the parallel work-index `AtomicUsize` (the atomic is already thread-safe), removing needless lock contention.
+ - Refactor: extracter the three near-identical PBF collect passes (relations/ways/nodes) into a shared `collect_from_pbf` scaffold that handles the worker threads, blob dispatch and reduce, leaving each pass to supply only its per-blob processing.
  - Changed: `Parser::get_relation_from_id` now takes `&self` instead of consuming the `Parser`.
  - Changed: filter string is now parsed once into conditions instead of being re-parsed for every relation and way.
  - Changed: merged the near-identical `filter_relation` and `filter_way` into a single `matches_conditions` helper.
