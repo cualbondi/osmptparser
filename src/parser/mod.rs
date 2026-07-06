@@ -769,7 +769,11 @@ impl fmt::Debug for Parser {
             writeln!(
                 f,
                 "{:?}: ways {:?}, stops {:?}, nodes {:?}, {:?}",
-                relation.id, ways_count, stops_count, nodes_count, relation.tags["name"]
+                relation.id,
+                ways_count,
+                stops_count,
+                nodes_count,
+                relation.tags.get("name").map(String::as_str).unwrap_or("")
             )?;
         }
         writeln!(f, "\nFound {:?} relations", count)?;

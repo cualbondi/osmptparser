@@ -5,6 +5,7 @@ Bugfix and test coverage
  - **BREAKING**: `Parser::new`, `Parser::new_ptv2` and `Parser::new_aa` now return `std::io::Result<Self>` (previously it returned `Self` and panicked).
  - Fixed: `edgedistance`, `sort_ways` did not actually sort ways by proximity.
  - Added: unit tests pinning the geometry functions (pointdistance, dist_haversine, edgedistance, first_pass, sort_ways, join_ways, close_linestring, flatten_ways).
+ - Fixed: `Debug for Parser` panicked on relations without a `name` tag.
 
 ## v2.2.0
 
