@@ -18,3 +18,13 @@ fn get_public_transports() {
     assert_eq!(pts[1].info["timestamp"], "1555013271");
     assert_eq!(pts[1].stops.iter().count(), 1);
 }
+
+#[test]
+fn get_relation_from_id() {
+    let parser = Parser::new_ptv2("tests/test.pbf", 1).unwrap();
+    let relation = parser.get_relation_from_id(85965).unwrap();
+    assert_eq!(relation.id, 85965);
+    assert_eq!(relation.tags["name"], "Trolebus Quitumbe => La Y");
+    // an id that was not parsed returns None instead of panicking
+    assert!(parser.get_relation_from_id(1).is_none());
+}

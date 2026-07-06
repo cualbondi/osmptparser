@@ -645,11 +645,10 @@ impl Parser {
         relations_ways.into_iter().chain(areas_ways).collect()
     }
 
-    /// Builds the Relation from the provided osm_id `id`
-    pub fn get_relation_from_id(&self, id: u64) -> Relation {
-        let relopt = self.relations.iter().find(|rel| rel.id == id);
-        let rel = relopt.as_ref().unwrap();
-        self.get_relation_from(rel)
+    /// Builds the Relation from the provided osm_id `id`, or `None` if no relation with that id was parsed
+    pub fn get_relation_from_id(&self, id: u64) -> Option<Relation> {
+        let rel = self.relations.iter().find(|rel| rel.id == id)?;
+        Some(self.get_relation_from(rel))
     }
 
     /// Builds the Relation providing relationdata internal cache
