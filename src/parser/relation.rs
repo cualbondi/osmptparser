@@ -1,13 +1,19 @@
 use serde_json::json;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::parse_status::ParseStatus;
+
+/// Shared, cheaply-cloneable map of OSM tags / metadata.
+/// Wrapped in `Arc` so materializing relations/ways/nodes from the cache
+/// bumps a refcount instead of deep-copying the map.
+pub type Tags = Arc<HashMap<String, String>>;
 
 /// OSM node representation with all the relevant osm data (tags and id)
 #[derive(Clone, Debug)]
 pub struct Node {
     pub id: u64,
-    pub tags: HashMap<String, String>,
+    pub tags: Tags,
     pub lat: f64,
     pub lon: f64,
 }
@@ -23,8 +29,8 @@ impl Eq for Node {}
 #[derive(Clone, Debug)]
 pub struct Way {
     pub id: u64,
-    pub tags: HashMap<String, String>,
-    pub info: HashMap<String, String>,
+    pub tags: Tags,
+    pub info: Tags,
     pub nodes: Vec<Node>,
 }
 
@@ -32,8 +38,8 @@ pub struct Way {
 #[derive(Clone, Debug)]
 pub struct Relation {
     pub id: u64,
-    pub tags: HashMap<String, String>,
-    pub info: HashMap<String, String>,
+    pub tags: Tags,
+    pub info: Tags,
     pub ways: Vec<Way>,
     pub stops: Vec<Node>,
 }
@@ -46,9 +52,9 @@ pub struct PublicTransport {
     /// osm id
     pub id: u64,
     /// osm tags of the public transport relation
-    pub tags: HashMap<String, String>,
+    pub tags: Tags,
     /// osm metadata of the public transport relation
-    pub info: HashMap<String, String>,
+    pub info: Tags,
     /// stop nodes of the public transport relation with latlng and internal tags
     pub stops: Vec<Node>,
     /// geometry (linestring/multilinestring), best effort fixed
@@ -65,9 +71,9 @@ pub struct Area {
     /// osm object type (n=node, w=way, r=relation)
     pub id_type: char,
     /// osm tags of the Area
-    pub tags: HashMap<String, String>,
+    pub tags: Tags,
     /// osm metadata of the Area
-    pub info: HashMap<String, String>,
+    pub info: Tags,
     /// geometry (polygon/multipolygon), best effort fixed
     pub geometry: Vec<Vec<LonLat>>,
     /// parse status, info on workarounds applied when parsing to fix semi-broken osm area
@@ -325,8 +331,8 @@ impl Area {
             "properties": {
                 "id": self.id,
                 "id_type": self.id_type,
-                "tags": self.tags,
-                "info": self.info,
+                "tags": self.tags.as_ref(),
+                "info": self.info.as_ref(),
                 "parse_status": {
                     "code": self.parse_status.code(),
                     "detail": self.parse_status.detail(),
@@ -347,8 +353,8 @@ impl PublicTransport {
             "type": "FeatureCollection",
             "properties": {
                 "id": self.id,
-                "tags": self.tags,
-                "info": self.info,
+                "tags": self.tags.as_ref(),
+                "info": self.info.as_ref(),
                 "parse_status": {
                     "code": self.parse_status.code(),
                     "detail": self.parse_status.detail(),
@@ -368,7 +374,7 @@ impl PublicTransport {
                         "type": "Feature",
                         "properties": {
                             "id": s.id,
-                            "tags": s.tags,
+                            "tags": s.tags.as_ref(),
                         },
                         "geometry": {
                             "type": "Point",
@@ -390,7 +396,7 @@ mod tests {
     fn n(id: u64, lat: f64, lon: f64) -> Node {
         Node {
             id,
-            tags: HashMap::new(),
+            tags: Arc::new(HashMap::new()),
             lat,
             lon,
         }
@@ -596,8 +602,8 @@ mod tests {
     fn way(id: u64, nodes: Vec<Node>) -> Way {
         Way {
             id,
-            tags: HashMap::new(),
-            info: HashMap::new(),
+            tags: Arc::new(HashMap::new()),
+            info: Arc::new(HashMap::new()),
             nodes,
         }
     }
@@ -608,8 +614,8 @@ mod tests {
         // not panic the index-based joining pipeline
         let rel = Relation {
             id: 1,
-            tags: HashMap::new(),
-            info: HashMap::new(),
+            tags: Arc::new(HashMap::new()),
+            info: Arc::new(HashMap::new()),
             ways: vec![
                 way(2, Vec::new()),
                 way(1, vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)]),
@@ -626,8 +632,8 @@ mod tests {
     fn relation_flatten_ways_all_empty_is_broken() {
         let rel = Relation {
             id: 1,
-            tags: HashMap::new(),
-            info: HashMap::new(),
+            tags: Arc::new(HashMap::new()),
+            info: Arc::new(HashMap::new()),
             ways: vec![way(2, Vec::new())],
             stops: Vec::new(),
         };

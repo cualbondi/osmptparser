@@ -16,7 +16,7 @@ use std::thread;
 use osm_pbf_iter::{Blob, BlobReader, Primitive, PrimitiveBlock, RelationMemberType};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use relation::{Area, Node, PublicTransport, Relation, Way};
+use relation::{Area, Node, PublicTransport, Relation, Tags, Way};
 
 /// Progress logging to stderr, silenced unless the `OSMSM_VERBOSE` env var is set.
 macro_rules! progress {
@@ -33,22 +33,22 @@ struct NodeData {
     // id: u64,
     lat: f64,
     lon: f64,
-    tags: HashMap<String, String>,
+    tags: Tags,
 }
 
 #[derive(Clone, Debug)]
 struct WayData {
     id: u64,
-    tags: HashMap<String, String>,
-    info: HashMap<String, String>,
+    tags: Tags,
+    info: Tags,
     nodes: Vec<u64>,
 }
 
 #[derive(Clone, Debug)]
 struct RelationData {
     id: u64,
-    tags: HashMap<String, String>,
-    info: HashMap<String, String>,
+    tags: Tags,
+    info: Tags,
     ways: Vec<u64>,
     stops: Vec<u64>,
 }
@@ -318,11 +318,13 @@ impl Parser {
                                 // condicion para saber si esta relation es un public transport
                                 let mut rd = RelationData {
                                     id: relation.id,
-                                    tags: relation
-                                        .tags()
-                                        .map(|t| (t.0.to_string(), t.1.to_string()))
-                                        .collect(),
-                                    info,
+                                    tags: Arc::new(
+                                        relation
+                                            .tags()
+                                            .map(|t| (t.0.to_string(), t.1.to_string()))
+                                            .collect(),
+                                    ),
+                                    info: Arc::new(info),
                                     ways: Vec::new(),
                                     stops: Vec::new(),
                                 };
@@ -385,11 +387,12 @@ impl Parser {
                                     way.id,
                                     WayData {
                                         id: way.id,
-                                        tags: way
-                                            .tags()
-                                            .map(|t| (t.0.to_string(), t.1.to_string()))
-                                            .collect(),
-                                        info: HashMap::new(),
+                                        tags: Arc::new(
+                                            way.tags()
+                                                .map(|t| (t.0.to_string(), t.1.to_string()))
+                                                .collect(),
+                                        ),
+                                        info: Arc::new(HashMap::new()),
                                         nodes: way.refs().map(|id| id as u64).collect(),
                                     },
                                 );
@@ -399,11 +402,12 @@ impl Parser {
                                 let info = Self::info_map(way.info.as_ref());
                                 let wd = WayData {
                                     id: way.id,
-                                    tags: way
-                                        .tags()
-                                        .map(|t| (t.0.to_string(), t.1.to_string()))
-                                        .collect(),
-                                    info,
+                                    tags: Arc::new(
+                                        way.tags()
+                                            .map(|t| (t.0.to_string(), t.1.to_string()))
+                                            .collect(),
+                                    ),
+                                    info: Arc::new(info),
                                     nodes: way.refs().map(|id| id as u64).collect(),
                                 };
                                 if !wd.nodes.is_empty() {
@@ -454,11 +458,12 @@ impl Parser {
                                     node.id,
                                     NodeData {
                                         // id: node.id,
-                                        tags: node
-                                            .tags
-                                            .into_iter()
-                                            .map(|t| (t.0.to_string(), t.1.to_string()))
-                                            .collect(),
+                                        tags: Arc::new(
+                                            node.tags
+                                                .into_iter()
+                                                .map(|t| (t.0.to_string(), t.1.to_string()))
+                                                .collect(),
+                                        ),
                                         lat: node.lat,
                                         lon: node.lon,
                                     },
