@@ -4,7 +4,7 @@ use std::io::{self, Write};
 pub mod parse_status;
 pub mod relation;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
 use std::io::BufReader;
@@ -14,6 +14,7 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 
 use osm_pbf_iter::{Blob, BlobReader, Primitive, PrimitiveBlock, RelationMemberType};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use relation::{Area, Node, PublicTransport, Relation, Way};
 
@@ -52,8 +53,10 @@ struct RelationData {
     stops: Vec<u64>,
 }
 
-type WayIdsSet = HashSet<u64>;
-type NodeIdsSet = HashSet<u64>;
+// u64-keyed sets/maps use rustc-hash's fast (non-cryptographic) FxHasher instead
+// of the default SipHash: these are the hot lookups over millions of osm ids.
+type WayIdsSet = FxHashSet<u64>;
+type NodeIdsSet = FxHashSet<u64>;
 
 /// One accepted value of a filter condition (the part after `=`, split by `,`)
 struct ConditionValue {
@@ -83,13 +86,13 @@ struct MessageRelations {
 #[derive(Default)]
 struct MessageWays {
     ways: Vec<WayData>,
-    relations_ways: HashMap<u64, WayData>,
+    relations_ways: FxHashMap<u64, WayData>,
     node_ids: NodeIdsSet,
 }
 
 #[derive(Default)]
 struct MessageNodes {
-    nodes: HashMap<u64, NodeData>,
+    nodes: FxHashMap<u64, NodeData>,
 }
 
 /// Main class that parses a pbf file and maintains a cache of relations/ways/nodes
@@ -97,9 +100,9 @@ struct MessageNodes {
 #[derive(Clone)]
 pub struct Parser {
     relations: Vec<RelationData>,
-    relations_ways: HashMap<u64, WayData>,
+    relations_ways: FxHashMap<u64, WayData>,
     ways: Vec<WayData>,
-    nodes: HashMap<u64, NodeData>,
+    nodes: FxHashMap<u64, NodeData>,
     cpus: usize,
 }
 
@@ -290,10 +293,10 @@ impl Parser {
     pub fn new(pbf_filename: &str, cpus: usize, filters: String) -> io::Result<Self> {
         let mut relations = Vec::new() as Vec<RelationData>;
         let mut ways = Vec::new() as Vec<WayData>;
-        let mut relations_ways = HashMap::default() as HashMap<u64, WayData>;
-        let mut nodes = HashMap::default() as HashMap<u64, NodeData>;
-        let way_ids = Arc::new(RwLock::new(HashSet::default() as WayIdsSet));
-        let node_ids = Arc::new(RwLock::new(HashSet::default() as NodeIdsSet));
+        let mut relations_ways = FxHashMap::default() as FxHashMap<u64, WayData>;
+        let mut nodes = FxHashMap::default() as FxHashMap<u64, NodeData>;
+        let way_ids = Arc::new(RwLock::new(FxHashSet::default() as WayIdsSet));
+        let node_ids = Arc::new(RwLock::new(FxHashSet::default() as NodeIdsSet));
         let filters_arc = Arc::new(Self::parse_filters(&filters));
 
         /*

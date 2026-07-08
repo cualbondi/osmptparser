@@ -14,6 +14,7 @@ Bugfix and test coverage
  - Added: criterion end-to-end benchmark (`cargo bench`) over `tests/test.pbf`, measuring the full ptv2 parse+process pipeline as well as the parse and process phases separately.
  - Added: an `ecuador` benchmark group that runs the ptv2 pipeline over a real ~114 MB country extract, downloaded (via curl/wget) to `ecuador-latest.osm.pbf` on first `cargo bench` and reused afterwards; unlike the tiny `test.pbf`, its node count is large enough to reflect real parsing costs.
  - Fixed: `Debug for Parser` panicked on relations without a `name` tag.
+ - Performance: up to 14% improvement. the u64-keyed id sets and node/way caches now use rustc-hash's `FxHashMap`/`FxHashSet` instead of the default SipHash, speeding up the millions of osm-id inserts and lookups during parsing.
  - Internal: dropped the redundant `RwLock` around the parallel work-index `AtomicUsize` (the atomic is already thread-safe), removing needless lock contention.
  - Refactor: extracter the three near-identical PBF collect passes (relations/ways/nodes) into a shared `collect_from_pbf` scaffold that handles the worker threads, blob dispatch and reduce, leaving each pass to supply only its per-blob processing.
  - Changed: `Parser::get_relation_from_id` now takes `&self` instead of consuming the `Parser`.
