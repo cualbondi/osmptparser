@@ -17,6 +17,16 @@ use osm_pbf_iter::{Blob, BlobReader, Primitive, PrimitiveBlock, RelationMemberTy
 
 use relation::{Area, Node, PublicTransport, Relation, Way};
 
+/// Progress logging to stderr, silenced unless the `OSMSM_VERBOSE` env var is set.
+macro_rules! progress {
+    ($($arg:tt)*) => {
+        if std::env::var_os("OSMSM_VERBOSE").is_some() {
+            eprint!($($arg)*);
+            io::stderr().flush().unwrap();
+        }
+    };
+}
+
 #[derive(Clone, Debug)]
 struct NodeData {
     // id: u64,
@@ -211,8 +221,7 @@ impl Parser {
         S: Default + Send + 'static,
         P: Fn(&mut S, &[u8]) + Send + Sync + Clone + 'static,
     {
-        eprint!("START {} map, ", label);
-        io::stderr().flush().unwrap();
+        progress!("START {} map, ", label);
 
         let f = File::open(pbf_filename)?;
         let mut reader = BlobReader::new(BufReader::new(f));
@@ -240,8 +249,7 @@ impl Parser {
             req_tx.send(blob).unwrap();
         }
 
-        eprint!("reduce, ");
-        io::stderr().flush().unwrap();
+        progress!("reduce, ");
 
         // drop each request sender so its worker's recv loop ends, then collect its state
         let mut results = Vec::with_capacity(cpus);
@@ -347,7 +355,7 @@ impl Parser {
             }
             drop(node_ids_write);
             drop(way_ids_write);
-            eprintln!("found {}", relations.len());
+            progress!("found {}\n", relations.len());
         }
 
         /*
@@ -417,8 +425,8 @@ impl Parser {
                 node_ids_write.extend(worker_data.node_ids);
             }
             drop(node_ids_write);
-            eprintln!(
-                "found {} for relations +{} new",
+            progress!(
+                "found {} for relations +{} new\n",
                 relations_ways.len(),
                 ways.len()
             );
@@ -463,7 +471,7 @@ impl Parser {
                 nodes.extend(worker_data.nodes);
             }
         }
-        eprintln!("found {}", nodes.len());
+        progress!("found {}\n", nodes.len());
 
         Ok(Parser {
             relations,

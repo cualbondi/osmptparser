@@ -6,6 +6,7 @@ Bugfix and test coverage
  - **BREAKING**: `ParseStatus` is now an enum (`Ok`, `Sorted`, `Joined`, `JoinedSorted`, `Broken`) instead of a struct of magic numeric codes; use `ParseStatus::code()` / `ParseStatus::detail()` for the previous `code`/`detail` values (JSON output is unchanged).
  - **BREAKING**: `Parser::get_relation_from_id` now returns `Option<Relation>` (`None` when no relation with that id was parsed) instead of panicking on a missing id.
  - **BREAKING**: `Relation::flatten_ways` and `Way::flatten_ways` now return `(Vec<Vec<Node>>, ParseStatus)` directly instead of a `Result`; they never returned `Err`, and the unused `ParseError` type was removed.
+ - Changed: progress logging (`START ... map, reduce, found N`) is now silent by default and only printed to stderr when the `OSMSM_VERBOSE` env var is set.
  - Fixed: `edgedistance`, `sort_ways` did not actually sort ways by proximity.
  - Fixed: empty ways from clipped extracts no longer panic the flatten pipeline; they are skipped and the geometry is reported as `Broken` when nothing usable remains.
  - Fixed: closing a linestring no longer discards the flatten workaround status; the flatten and close steps' workarounds are now unioned (e.g. a sorted ring that also needed joining now reports `JoinedSorted` instead of `Joined`).
