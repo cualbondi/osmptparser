@@ -57,7 +57,7 @@ you should get a json list with one geojson per ptv2 containing a linestring and
 ## Run CI linter + recommendations + tests
 
 ```
-cargo fmt -- --check && cargo clippy -- -D warnings -A clippy::ptr-arg && cargo test
+cargo fmt -- --check && cargo clippy --all-targets -- -D warnings -A clippy::ptr-arg && cargo test
 ```
 
 ## Build pbf test file

@@ -16,7 +16,7 @@ jobs:
     - name: Format
       run: cargo fmt -- --check
     - name: Clippy
-      run: cargo clippy -- -D warnings -A clippy::ptr-arg
+      run: cargo clippy --all-targets -- -D warnings -A clippy::ptr-arg
     - name: Tests
       run: cargo test --verbose
     - name: codecov

@@ -2,8 +2,8 @@ extern crate num_cpus;
 use osmptparser::Parser;
 
 fn main() {
-    let pbf_filename_option = std::env::args().skip(1).next();
-    if pbf_filename_option == None {
+    let pbf_filename_option = std::env::args().nth(1);
+    if pbf_filename_option.is_none() {
         return println!("Expected filename");
     }
     let pbf_filename = pbf_filename_option.unwrap();
