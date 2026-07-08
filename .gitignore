@@ -1,6 +1,7 @@
 /target
 **/*.rs.bk
 /*.pbf
+/*.pbf.part
 /*.o5m
 .vscode
 .env
