@@ -11,6 +11,7 @@ Bugfix and test coverage
  - Fixed: empty ways from clipped extracts no longer panic the flatten pipeline; they are skipped and the geometry is reported as `Broken` when nothing usable remains.
  - Fixed: closing a linestring no longer discards the flatten workaround status; the flatten and close steps' workarounds are now unioned (e.g. a sorted ring that also needed joining now reports `JoinedSorted` instead of `Joined`).
  - Added: unit tests pinning the geometry functions (pointdistance, dist_haversine, edgedistance, first_pass, sort_ways, join_ways, close_linestring, flatten_ways).
+ - Added: criterion end-to-end benchmark (`cargo bench`) over `tests/test.pbf`, measuring the full ptv2 parse+process pipeline as well as the parse and process phases separately.
  - Fixed: `Debug for Parser` panicked on relations without a `name` tag.
  - Internal: dropped the redundant `RwLock` around the parallel work-index `AtomicUsize` (the atomic is already thread-safe), removing needless lock contention.
  - Refactor: extracter the three near-identical PBF collect passes (relations/ways/nodes) into a shared `collect_from_pbf` scaffold that handles the worker threads, blob dispatch and reduce, leaving each pass to supply only its per-blob processing.
