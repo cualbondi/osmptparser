@@ -190,8 +190,9 @@ impl Parser {
             if let Some(version) = info.version {
                 map.insert("version".to_string(), version.to_string());
             }
+            // osm_pbf_iter gives milliseconds; keep the output in epoch seconds
             if let Some(timestamp) = info.timestamp {
-                map.insert("timestamp".to_string(), timestamp.to_string());
+                map.insert("timestamp".to_string(), (timestamp / 1000).to_string());
             }
             if let Some(changeset) = info.changeset {
                 map.insert("changeset".to_string(), changeset.to_string());
