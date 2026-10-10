@@ -12,6 +12,7 @@ Bugfix and test coverage
  - Changed: updated all dependencies to their latest versions.
  - Fixed: `info.timestamp` stays in epoch seconds with osm_pbf_iter 0.2.3 (which returns milliseconds).
  - Added: `profile` example that writes a pprof flamegraph of the ptv2 pipeline.
+ - Internal: CI runs on the `rust:1` image with tarpaulin and codecov-action.
  - Changed: progress logging (`START ... map, reduce, found N`) is now silent by default and only printed to stderr when the `OSMSM_VERBOSE` env var is set.
  - Fixed: `edgedistance`, `sort_ways` did not actually sort ways by proximity.
  - Fixed: empty ways from clipped extracts no longer panic the flatten pipeline; they are skipped and the geometry is reported as `Broken` when nothing usable remains.

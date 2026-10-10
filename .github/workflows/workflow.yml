@@ -8,18 +8,27 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: cualbondi/rust:1.37.0-0
+      image: rust:1
       options: --cpus 1 --security-opt seccomp=unconfined
 
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+    - name: Install rustfmt and clippy
+      run: rustup component add rustfmt clippy
     - name: Format
       run: cargo fmt -- --check
     - name: Clippy
       run: cargo clippy --all-targets -- -D warnings -A clippy::ptr-arg
     - name: Tests
       run: cargo test --verbose
+    - name: Install cargo-tarpaulin
+      uses: taiki-e/install-action@4076c08d76dba979c11a7285295b0716c1d67908  # v2.87.15
+      with:
+        tool: cargo-tarpaulin@0.37.5
+    - name: Coverage
+      run: taskset -c 0 cargo tarpaulin --out Xml
     - name: codecov
-      run: taskset -c 0 cargo tarpaulin --out Xml && curl -s https://codecov.io/bash -o codecov.sh && bash codecov.sh
-      env:
-        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
+      with:
+        files: cobertura.xml
+        token: ${{ secrets.CODECOV_TOKEN }}
