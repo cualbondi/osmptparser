@@ -8,6 +8,7 @@ Bugfix and test coverage
  - **BREAKING**: `Relation::flatten_ways` and `Way::flatten_ways` now return `(Vec<Vec<Node>>, ParseStatus)` directly instead of a `Result`; they never returned `Err`, and the unused `ParseError` type was removed.
  - **BREAKING**: *[Performance +35%]*. the `tags` and `info` fields on `Node`, `Way`, `Relation`, `PublicTransport` and `Area` are now `Tags` (an exported alias for `Arc<HashMap<String, String>>`) instead of `HashMap<String, String>`. Materializing relations/ways/nodes from the cache now shares these maps via reference-count bumps instead of deep-copying them. Reading tags (`tags["key"]`, `tags.get(...)`) is unchanged; code that constructs these structs directly must wrap the maps in `Arc::new(...)`.
  - *[Performance +14%]* The u64-keyed id sets and node/way caches now use rustc-hash's `FxHashMap`/`FxHashSet` instead of the default SipHash, speeding up the millions of osm-id inserts and lookups during parsing.
+ - Changed: `sort_ways` sorts by index and clones each way once.
  - Changed: progress logging (`START ... map, reduce, found N`) is now silent by default and only printed to stderr when the `OSMSM_VERBOSE` env var is set.
  - Fixed: `edgedistance`, `sort_ways` did not actually sort ways by proximity.
  - Fixed: empty ways from clipped extracts no longer panic the flatten pipeline; they are skipped and the geometry is reported as `Broken` when nothing usable remains.

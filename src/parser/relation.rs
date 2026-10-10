@@ -152,24 +152,27 @@ fn first_pass(ways: &Vec<Vec<Node>>) -> Vec<Vec<Node>> {
 ///
 /// TODO: this can probably be made with some std function like vec.sort(|nodesa, nodesb| edgedistance(nodesa, nodesb))
 fn sort_ways(ways: &Vec<Vec<Node>>) -> Vec<Vec<Node>> {
-    let mut ws = ways.to_owned();
-    let mut sorted_ways = vec![ws[0].clone()];
-    ws = ws[1..].to_vec();
-    while !ws.is_empty() {
+    // work on indices so we only compare endpoints (edgedistance) instead of
+    // cloning whole ways on every comparison; clone each way once at the end
+    let mut remaining: Vec<usize> = (1..ways.len()).collect();
+    let mut sorted_indices = vec![0usize];
+    while !remaining.is_empty() {
+        let last = &ways[*sorted_indices.last().unwrap()];
         let mut mindist = f64::INFINITY;
-        let mut minidx = 0usize;
-        for (i, _) in ws.iter().enumerate() {
-            let w = ws[i].clone();
-            let dist = edgedistance(&w, &sorted_ways[sorted_ways.len() - 1]);
+        let mut min_pos = 0usize;
+        for (pos, &idx) in remaining.iter().enumerate() {
+            let dist = edgedistance(&ways[idx], last);
             if dist < mindist {
                 mindist = dist;
-                minidx = i;
+                min_pos = pos;
             }
         }
-        sorted_ways.push(ws[minidx].clone());
-        ws.remove(minidx);
+        sorted_indices.push(remaining.remove(min_pos));
     }
-    sorted_ways
+    sorted_indices
+        .into_iter()
+        .map(|i| ways[i].clone())
+        .collect()
 }
 
 /// calculate haversine distance between two nodes
