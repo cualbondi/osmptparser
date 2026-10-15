@@ -362,6 +362,7 @@ impl Parser {
             }
             drop(node_ids_write);
             drop(way_ids_write);
+            relations.sort_by_key(|r| r.id);
             progress!("found {}\n", relations.len());
         }
 
@@ -434,6 +435,7 @@ impl Parser {
                 node_ids_write.extend(worker_data.node_ids);
             }
             drop(node_ids_write);
+            ways.sort_by_key(|w| w.id);
             progress!(
                 "found {} for relations +{} new\n",
                 relations_ways.len(),
@@ -548,23 +550,23 @@ impl Parser {
                         break;
                     }
                     let processed = process(index);
-                    res_tx.send(processed).unwrap();
+                    res_tx.send((index, processed)).unwrap();
                 });
             }
 
-            // reduce / join all data from workers into one structure
-            let mut results = Vec::with_capacity(length);
+            // reduce / join all data from workers into one structure, in input order
+            let mut results: Vec<Option<R>> = (0..length).map(|_| None).collect();
             let mut errors = 0;
             while errors < cpus {
                 errors = 0;
                 for res_rx in workers.iter() {
                     match res_rx.recv() {
-                        Ok(worker_data) => results.push(worker_data),
+                        Ok((index, worker_data)) => results[index] = Some(worker_data),
                         Err(_) => errors += 1,
                     };
                 }
             }
-            results
+            results.into_iter().map(|r| r.unwrap()).collect()
         })
         .unwrap()
     }
