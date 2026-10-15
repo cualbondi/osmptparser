@@ -109,3 +109,28 @@ fn relation_members_keep_their_roles() {
     assert_eq!(bus.stops[0].role, "stop");
     assert_eq!(bus.ways[0].role, "");
 }
+
+#[test]
+fn results_are_sorted_by_id_whatever_the_thread_count() {
+    let ids = |cpus| {
+        Parser::new_aa("tests/areas.pbf", cpus)
+            .unwrap()
+            .get_areas(150.0)
+            .iter()
+            .map(|a| (a.id_type, a.id))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(1), vec![('r', 100), ('r', 200), ('r', 300), ('w', 6)]);
+    assert_eq!(ids(1), ids(3));
+
+    let pt_ids = |cpus| {
+        Parser::new_ptv2("tests/test.pbf", cpus)
+            .unwrap()
+            .get_public_transports(1500_f64)
+            .iter()
+            .map(|p| p.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(pt_ids(1), vec![85965, 2030162]);
+    assert_eq!(pt_ids(1), pt_ids(4));
+}

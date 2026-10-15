@@ -1,3 +1,9 @@
+## v4.1.0
+
+Deterministic output order
+
+ - Changed: `Parser::get_public_transports`, `Parser::get_areas` and `Parser::par_map` now return their results in a deterministic order: relations sorted by osm id, then (for `get_areas`) standalone ways sorted by osm id, whatever the number of threads. Before, the order depended on which worker thread finished first, so two runs on the same file gave the same elements in a different order.
+
 ## v4.0.0
 
 Areas as real multipolygons, relation member roles
