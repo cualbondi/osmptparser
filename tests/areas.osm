@@ -1,0 +1,92 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<osm version="0.6" generator="handmade">
+  <!-- province outer ring, split in two open ways given out of order -->
+  <node id="1" lat="0.0" lon="0.0" version="1"/>
+  <node id="2" lat="0.0" lon="1.0" version="1"/>
+  <node id="3" lat="1.0" lon="1.0" version="1"/>
+  <node id="4" lat="1.0" lon="0.0" version="1"/>
+  <!-- province hole -->
+  <node id="11" lat="0.4" lon="0.4" version="1"/>
+  <node id="12" lat="0.4" lon="0.6" version="1"/>
+  <node id="13" lat="0.6" lon="0.6" version="1"/>
+  <node id="14" lat="0.6" lon="0.4" version="1"/>
+  <!-- town: two closed outer rings (exclave) -->
+  <node id="21" lat="2.0" lon="0.0" version="1"/>
+  <node id="22" lat="2.0" lon="0.5" version="1"/>
+  <node id="23" lat="2.5" lon="0.5" version="1"/>
+  <node id="24" lat="2.5" lon="0.0" version="1"/>
+  <node id="31" lat="2.0" lon="1.0" version="1"/>
+  <node id="32" lat="2.0" lon="1.5" version="1"/>
+  <node id="33" lat="2.5" lon="1.5" version="1"/>
+  <node id="34" lat="2.5" lon="1.0" version="1"/>
+  <!-- village: standalone closed way -->
+  <node id="41" lat="3.0" lon="0.0" version="1"/>
+  <node id="42" lat="3.0" lon="0.2" version="1"/>
+  <node id="43" lat="3.2" lon="0.2" version="1"/>
+  <node id="44" lat="3.2" lon="0.0" version="1"/>
+  <!-- broken: open way with a huge gap -->
+  <node id="51" lat="4.0" lon="0.0" version="1"/>
+  <node id="52" lat="4.0" lon="1.0" version="1"/>
+  <node id="53" lat="5.0" lon="1.0" version="1"/>
+  <!-- stop node, member of a bus route that must be ignored by new_aa -->
+  <node id="61" lat="0.5" lon="0.5" version="1">
+    <tag k="public_transport" v="stop_position"/>
+  </node>
+
+  <way id="1" version="1">
+    <nd ref="1"/><nd ref="2"/><nd ref="3"/>
+  </way>
+  <way id="2" version="1">
+    <nd ref="3"/><nd ref="4"/><nd ref="1"/>
+  </way>
+  <way id="3" version="1">
+    <nd ref="11"/><nd ref="12"/><nd ref="13"/><nd ref="14"/><nd ref="11"/>
+  </way>
+  <way id="4" version="1">
+    <nd ref="21"/><nd ref="22"/><nd ref="23"/><nd ref="24"/><nd ref="21"/>
+  </way>
+  <way id="5" version="1">
+    <nd ref="31"/><nd ref="32"/><nd ref="33"/><nd ref="34"/><nd ref="31"/>
+  </way>
+  <way id="6" version="1">
+    <nd ref="41"/><nd ref="42"/><nd ref="43"/><nd ref="44"/><nd ref="41"/>
+    <tag k="boundary" v="administrative"/>
+    <tag k="admin_level" v="9"/>
+    <tag k="name" v="Village"/>
+  </way>
+  <way id="7" version="1">
+    <nd ref="51"/><nd ref="52"/><nd ref="53"/>
+  </way>
+
+  <relation id="100" version="1">
+    <member type="way" ref="2" role="outer"/>
+    <member type="way" ref="3" role="inner"/>
+    <member type="way" ref="1" role="outer"/>
+    <tag k="type" v="boundary"/>
+    <tag k="boundary" v="administrative"/>
+    <tag k="admin_level" v="4"/>
+    <tag k="name" v="Province"/>
+  </relation>
+  <relation id="200" version="1">
+    <member type="way" ref="4" role="outer"/>
+    <member type="way" ref="5" role="outer"/>
+    <tag k="type" v="boundary"/>
+    <tag k="boundary" v="administrative"/>
+    <tag k="admin_level" v="8"/>
+    <tag k="name" v="Town"/>
+  </relation>
+  <relation id="300" version="1">
+    <member type="way" ref="7" role="outer"/>
+    <tag k="type" v="boundary"/>
+    <tag k="boundary" v="administrative"/>
+    <tag k="admin_level" v="8"/>
+    <tag k="name" v="Broken"/>
+  </relation>
+  <relation id="400" version="1">
+    <member type="node" ref="61" role="stop"/>
+    <member type="way" ref="1" role=""/>
+    <tag k="type" v="route"/>
+    <tag k="route" v="bus"/>
+    <tag k="name" v="Bus"/>
+  </relation>
+</osm>
