@@ -11,14 +11,14 @@ Blazing fast by design: every step in the process pipeline is fully parallelized
 ### How it works
 
 1. Reads data from a .pbf file, extracting ways and relations filtered by attributes specified via the `--filter` argument.
-2. Processes each relation as follows:
+2. Processes each public transport relation as follows:
    1. Sorts all the ways within the relation based on proximity.
    2. Joins ways that share identical lat/lng coordinates at their first or last nodes, combining them into a single LineString.
    3. If multiple LineStrings remain after this step:
       - It checks for gaps.
       - If the gaps are smaller than the specified gap threshold (in meters, default: 150), they are joined into one LineString.
 3. Outputs a JSON array, with one GeoJSON feature per way or relation found, including:
-   - For areas: a single LineString or MultiLineString feature.
+   - For areas: a MultiPolygon feature. Ways with role `inner` are holes, every other way is part of an outer ring; rings are chained by shared nodes in any member order, a gap smaller than the threshold is bridged, and an area with any ring that cannot be closed is reported as `Broken` with no geometry.
    - For public transport: a LineString representing the full path and an array of points representing the stops.
 
 [See the blogpost](https://jperelli.com.ar/post/2019/08/12/oxidizing-cualbondi/) for a very detailed description
@@ -54,13 +54,44 @@ cargo run --release ./ecuador-latest.osm.pbf --filter-ptv2
 ```
 you should get a json list with one geojson per ptv2 containing a linestring and each stop
 
+## Library
+
+```rust
+use osmptparser::{ParseStatus, Parser};
+
+let parser = Parser::new_aa("portugal-latest.osm.pbf", 0)?; // name&admin_level&boundary=administrative
+for area in parser.get_areas(150.0) {
+    // area.id_type is 'r' (relation) or 'w' (standalone closed way)
+    // area.geometry: Vec<polygon>, polygon = Vec<ring>, ring = Vec<(lon, lat)>, first ring is the outer one
+    if area.parse_status != ParseStatus::Broken {
+        println!("{}{} {} {} polygon(s)", area.id_type, area.id, area.tags["name"], area.geometry.len());
+    }
+}
+
+let parser = Parser::new_ptv2("portugal-latest.osm.pbf", 0)?;
+for pt in parser.get_public_transports(150.0) {
+    // pt.geometry: Vec<(lon, lat)>; pt.stops[i].role is the member role ("stop", "platform", ...)
+}
+
+// raw relations with their members: Way.role / Node.role keep the osm member role
+let relation = parser.get_relation_from_id(85965);
+```
+
 ## Run CI linter + recommendations + tests
 
 ```
 cargo fmt -- --check && cargo clippy --all-targets -- -D warnings -A clippy::ptr-arg && cargo test
 ```
 
-## Build pbf test file
+## Build pbf test files
+
+`tests/areas.pbf` is built from the hand-written `tests/areas.osm` (administrative areas with outer/inner rings, an exclave, a standalone closed way and a broken ring):
+
+```
+osmium cat -f pbf --overwrite -o tests/areas.pbf tests/areas.osm
+```
+
+`tests/test.pbf` (two ptv2 routes from Ecuador):
 
 ```
 wget http://download.geofabrik.de/south-america/ecuador-latest.osm.pbf

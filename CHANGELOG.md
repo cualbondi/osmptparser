@@ -1,3 +1,13 @@
+## v4.0.0
+
+Areas as real multipolygons, relation member roles
+
+ - **BREAKING**: `Area::geometry` is now a multipolygon, `Vec<Vec<Vec<(lon, lat)>>>` (polygons -> rings -> coordinates, first ring of each polygon is the outer one, the rest are holes), instead of a list of linestrings. `Area::to_geojson()` outputs a `MultiPolygon` instead of a `Polygon`. The CLI output for `--filter` changes accordingly.
+ - **BREAKING**: `Node` and `Way` have a new `role: String` field with the osm relation member role (`outer`, `inner`, `stop`, `platform`, ...; empty for the nodes of a way and for standalone ways). Code that constructs these structs directly must set it. `PublicTransport::to_geojson()` includes it in each stop's properties.
+ - Added: `Relation::polygons(tolerance)` and `Way::polygons(tolerance)` build a multipolygon following the osm multipolygon model: ways with role `inner` are holes, every other way is part of an outer ring; rings are chained by shared end nodes in any member order (`Sorted` when a way is taken out of order), a gap up to `tolerance` meters is bridged (`Joined`), each hole is assigned to the smallest outer ring that contains it, and any ring that cannot be closed makes the whole area `Broken` with an empty geometry. `Parser::get_areas` uses it, so areas with several outer rings (exclaves, islands) and holes are no longer flattened into one ring, and the inner rings are no longer mixed into the outer one.
+ - Added: `Node` and `Way` are now exported at the crate root (they were only reachable through `Relation` fields).
+ - Added: `tests/areas.osm` / `tests/areas.pbf` fixture and integration tests for `get_areas` and member roles; unit tests for the ring assembly.
+
 ## v3.0.0
 
 Bugfix and test coverage

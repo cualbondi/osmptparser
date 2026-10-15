@@ -49,8 +49,10 @@ struct RelationData {
     id: u64,
     tags: Tags,
     info: Tags,
-    ways: Vec<u64>,
-    stops: Vec<u64>,
+    /// (way id, member role) in member order
+    ways: Vec<(u64, String)>,
+    /// (node id, member role) in member order
+    stops: Vec<(u64, String)>,
 }
 
 // u64-keyed sets/maps use rustc-hash's fast (non-cryptographic) FxHasher instead
@@ -329,15 +331,14 @@ impl Parser {
                                     ways: Vec::new(),
                                     stops: Vec::new(),
                                 };
-                                for member in relation.members() {
-                                    // member = (role: &str, id: u64, type: RelationMemberType)
-                                    if member.2 == RelationMemberType::Way {
-                                        rd.ways.push(member.1);
-                                        state.way_ids.insert(member.1);
+                                for (role, id, member_type) in relation.members() {
+                                    if member_type == RelationMemberType::Way {
+                                        rd.ways.push((id, role.to_string()));
+                                        state.way_ids.insert(id);
                                     }
-                                    if member.2 == RelationMemberType::Node {
-                                        rd.stops.push(member.1);
-                                        state.stop_ids.insert(member.1);
+                                    if member_type == RelationMemberType::Node {
+                                        rd.stops.push((id, role.to_string()));
+                                        state.stop_ids.insert(id);
                                     }
                                 }
                                 if !rd.ways.is_empty() {
@@ -568,20 +569,31 @@ impl Parser {
         .unwrap()
     }
 
-    /// Builds a vector in parallel with all the areas normalized and "fixed".
-    /// It works in parallel using the same amount of threads that were configured on new()
+    /// node polygons -> (lon, lat) polygons
+    fn lonlat_polygons(polygons: Vec<Vec<Vec<Node>>>) -> Vec<Vec<Vec<(f64, f64)>>> {
+        polygons
+            .into_iter()
+            .map(|rings| {
+                rings
+                    .into_iter()
+                    .map(|ring| ring.into_iter().map(|n| (n.lon, n.lat)).collect())
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Builds a vector in parallel with all the areas (multipolygons) normalized and "fixed":
+    /// the relations matching the filter (outer/inner member rings) plus the closed ways
+    /// matching it. It works in parallel using the same amount of threads that were configured on new()
     pub fn get_areas(&self, gap: f64) -> Vec<Area> {
         let relations_ways = self.par_map(&move |r| {
-            let (f, s) = r.flatten_ways(gap, true);
+            let (f, s) = r.polygons(gap);
             Area {
                 id: r.id,
                 id_type: 'r',
                 tags: r.tags,
                 info: r.info,
-                geometry: f
-                    .iter()
-                    .map(|v| v.iter().map(|n| (n.lon, n.lat)).collect())
-                    .collect(),
+                geometry: Self::lonlat_polygons(f),
                 parse_status: s,
             }
         });
@@ -589,16 +601,13 @@ impl Parser {
         // iterates over all ways and creates a vector of areas
         let areas_ways = self.par_map_indexed(self.ways.len(), |index| {
             let way = self.get_way_at(index);
-            let (f, s) = way.flatten_ways(gap, true);
+            let (f, s) = way.polygons(gap);
             Area {
                 id: way.id,
                 id_type: 'w',
                 tags: way.tags,
                 info: way.info,
-                geometry: f
-                    .iter()
-                    .map(|v| v.iter().map(|n| (n.lon, n.lat)).collect())
-                    .collect(),
+                geometry: Self::lonlat_polygons(f),
                 parse_status: s,
             }
         });
@@ -616,15 +625,26 @@ impl Parser {
     /// Builds the Nodes for the given ids that exist in the internal cache, preserving order
     fn build_nodes(&self, ids: &[u64]) -> Vec<Node> {
         ids.iter()
-            .filter_map(|nid| {
-                self.nodes.get(nid).map(|node| Node {
-                    id: *nid,
-                    tags: node.tags.clone(),
-                    lat: node.lat,
-                    lon: node.lon,
-                })
-            })
+            .filter_map(|nid| self.build_node(*nid, String::new()))
             .collect()
+    }
+
+    /// Builds the Nodes for the given (id, member role) pairs that exist in the internal cache, preserving order
+    fn build_member_nodes(&self, members: &[(u64, String)]) -> Vec<Node> {
+        members
+            .iter()
+            .filter_map(|(nid, role)| self.build_node(*nid, role.clone()))
+            .collect()
+    }
+
+    fn build_node(&self, id: u64, role: String) -> Option<Node> {
+        self.nodes.get(&id).map(|node| Node {
+            id,
+            tags: node.tags.clone(),
+            lat: node.lat,
+            lon: node.lon,
+            role,
+        })
     }
 
     /// Builds the Relation providing relationdata internal cache
@@ -636,15 +656,16 @@ impl Parser {
             ways: relation_data
                 .ways
                 .iter()
-                .filter(|wid| self.relations_ways.contains_key(wid))
-                .map(|wid| Way {
+                .filter(|(wid, _)| self.relations_ways.contains_key(wid))
+                .map(|(wid, role)| Way {
                     id: *wid,
                     tags: self.relations_ways[wid].tags.clone(),
                     info: self.relations_ways[wid].info.clone(),
                     nodes: self.build_nodes(&self.relations_ways[wid].nodes),
+                    role: role.clone(),
                 })
                 .collect(),
-            stops: self.build_nodes(&relation_data.stops),
+            stops: self.build_member_nodes(&relation_data.stops),
         }
     }
 
@@ -655,6 +676,7 @@ impl Parser {
             tags: way_data.tags.clone(),
             info: way_data.info.clone(),
             nodes: self.build_nodes(&way_data.nodes),
+            role: String::new(),
         }
     }
 
@@ -690,7 +712,7 @@ impl fmt::Debug for Parser {
             let nodes_count: usize = relation
                 .ways
                 .iter()
-                .map(|wid| match self.relations_ways.get(wid) {
+                .map(|(wid, _)| match self.relations_ways.get(wid) {
                     Some(way) => way.nodes.len(),
                     None => 0,
                 })
