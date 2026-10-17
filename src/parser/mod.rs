@@ -7,7 +7,7 @@ pub mod relation;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Read};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::sync_channel;
 use std::sync::{Arc, RwLock};
@@ -95,6 +95,26 @@ struct MessageWays {
 #[derive(Default)]
 struct MessageNodes {
     nodes: FxHashMap<u64, NodeData>,
+}
+
+/// `Read` adapter whose `read` only returns less than asked at end of input: osm_pbf_iter's
+/// `BlobReader` takes a short read of a blob's 4-byte length as the end of the file, and a
+/// `BufReader` returns one when that length straddles its buffer, silently dropping the rest.
+struct ReadFull<R>(R);
+
+impl<R: Read> Read for ReadFull<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let mut n = 0;
+        while n < buf.len() {
+            match self.0.read(&mut buf[n..]) {
+                Ok(0) => break,
+                Ok(k) => n += k,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(n)
+    }
 }
 
 /// Main class that parses a pbf file and maintains a cache of relations/ways/nodes
@@ -230,7 +250,7 @@ impl Parser {
         progress!("START {} map, ", label);
 
         let f = File::open(pbf_filename)?;
-        let mut reader = BlobReader::new(BufReader::new(f));
+        let mut reader = BlobReader::new(ReadFull(BufReader::new(f)));
 
         let mut workers = Vec::with_capacity(cpus);
         for _ in 0..cpus {
@@ -753,5 +773,38 @@ impl IntoIterator for Parser {
     type IntoIter = ParserRelationIterator;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// returns at most one byte per `read`, like a `BufReader` at its buffer's edge
+    struct OneByte<R>(R);
+
+    impl<R: Read> Read for OneByte<R> {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let len = buf.len().min(1);
+            self.0.read(&mut buf[..len])
+        }
+    }
+
+    fn blob_count<R: Read>(read: R) -> usize {
+        BlobReader::new(read).count()
+    }
+
+    #[test]
+    fn read_full_reads_every_blob_whatever_the_underlying_reads() {
+        let all = blob_count(File::open("tests/test.pbf").unwrap());
+        assert!(all > 1);
+        assert_eq!(
+            blob_count(OneByte(File::open("tests/test.pbf").unwrap())),
+            0
+        );
+        assert_eq!(
+            blob_count(ReadFull(OneByte(File::open("tests/test.pbf").unwrap()))),
+            all
+        );
     }
 }

@@ -1,3 +1,9 @@
+## v4.1.1
+
+Bugfix: whole files parsed
+
+ - Fixed: parsing could stop silently partway through a .pbf file, returning only the elements read until then (or none at all). osm_pbf_iter's `BlobReader` takes a short read of a blob's 4-byte length as the end of the file, and the `BufReader` it reads from returns one whenever that length straddles its 8 KiB buffer, so whether and where a file was cut depended on its blob layout. The reader is now wrapped so every read is filled until the end of the file (the 2026-10-16 Geofabrik Australia extract stopped after 14401 of 18468 blobs, before any relation).
+
 ## v4.1.0
 
 Deterministic output order
