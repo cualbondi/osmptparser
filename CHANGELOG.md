@@ -1,3 +1,12 @@
+## v4.2.0
+
+Route ways by member role, chains that start in the middle
+
+ - Changed: `Relation::flatten_ways` (so `Parser::get_public_transports`) only travels the way members whose role is part of the itinerary: no role, `forward`, `backward` (PTv1) or `hail_and_ride`. Way members with any other role (`platform`, `platform_entry_only`, `platform_exit_only`, `stop`, `stop_entry_only`, `stop_exit_only`, ...) are platform areas/lines beside the road or stop ways in PTv2, not part of the route; chaining them in made perfectly connected routes come out `Broken`, or `Joined` with zig-zags to the platforms when the gap tolerance reached them. The excluded ways stay in `Relation::ways` with their `role`. On a sample of 797 cualbondi route relations, 51% of the `Broken` ones now parse (35% `Ok`). `Relation::polygons` / `Parser::get_areas` are unchanged.
+ - Added: `is_itinerary_role(role)` exported at the crate root.
+ - Fixed: a route whose first way member is in the middle of the chain is no longer `Broken` when the chain has no gaps: the proximity sort restarts from a way with a free endpoint when the greedy walk from the first member leaves pieces behind (`Sorted`).
+ - Added: route relations with a `platform` way member and with out-of-order members in the `tests/areas.osm` fixture, plus `get_public_transports` integration tests on it.
+
 ## v4.1.1
 
 Bugfix: whole files parsed

@@ -32,6 +32,18 @@
   <node id="61" lat="0.5" lon="0.5" version="1">
     <tag k="public_transport" v="stop_position"/>
   </node>
+  <!-- bus route: platform area beside the road, not part of the itinerary -->
+  <node id="71" lat="0.0001" lon="0.4" version="1"/>
+  <node id="72" lat="0.0001" lon="0.5" version="1"/>
+  <node id="73" lat="0.0002" lon="0.5" version="1"/>
+  <node id="74" lat="0.0002" lon="0.4" version="1"/>
+  <!-- bus route 500: five chained ways A-B-C-D-E, members given as C, A, E, B, D -->
+  <node id="81" lat="6.0" lon="0.0" version="1"/>
+  <node id="82" lat="6.0" lon="0.1" version="1"/>
+  <node id="83" lat="6.0" lon="0.2" version="1"/>
+  <node id="84" lat="6.0" lon="0.3" version="1"/>
+  <node id="85" lat="6.0" lon="0.4" version="1"/>
+  <node id="86" lat="6.0" lon="0.5" version="1"/>
 
   <way id="1" version="1">
     <nd ref="1"/><nd ref="2"/><nd ref="3"/>
@@ -56,6 +68,26 @@
   </way>
   <way id="7" version="1">
     <nd ref="51"/><nd ref="52"/><nd ref="53"/>
+  </way>
+  <way id="8" version="1">
+    <nd ref="71"/><nd ref="72"/><nd ref="73"/><nd ref="74"/><nd ref="71"/>
+    <tag k="public_transport" v="platform"/>
+    <tag k="area" v="yes"/>
+  </way>
+  <way id="81" version="1">
+    <nd ref="81"/><nd ref="82"/>
+  </way>
+  <way id="82" version="1">
+    <nd ref="82"/><nd ref="83"/>
+  </way>
+  <way id="83" version="1">
+    <nd ref="83"/><nd ref="84"/>
+  </way>
+  <way id="84" version="1">
+    <nd ref="84"/><nd ref="85"/>
+  </way>
+  <way id="85" version="1">
+    <nd ref="85"/><nd ref="86"/>
   </way>
 
   <relation id="100" version="1">
@@ -84,9 +116,21 @@
   </relation>
   <relation id="400" version="1">
     <member type="node" ref="61" role="stop"/>
+    <member type="way" ref="8" role="platform"/>
     <member type="way" ref="1" role=""/>
+    <member type="way" ref="2" role=""/>
     <tag k="type" v="route"/>
     <tag k="route" v="bus"/>
     <tag k="name" v="Bus"/>
+  </relation>
+  <relation id="500" version="1">
+    <member type="way" ref="83" role=""/>
+    <member type="way" ref="81" role=""/>
+    <member type="way" ref="85" role=""/>
+    <member type="way" ref="82" role=""/>
+    <member type="way" ref="84" role=""/>
+    <tag k="type" v="route"/>
+    <tag k="route" v="bus"/>
+    <tag k="name" v="Bus out of order"/>
   </relation>
 </osm>
