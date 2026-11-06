@@ -171,3 +171,16 @@ fn get_public_transports_skips_platform_way_members() {
     assert!(has_point(&out_of_order.geometry[0], (0.0, 6.0)));
     assert!(has_point(&out_of_order.geometry[0], (0.5, 6.0)));
 }
+
+#[test]
+fn get_public_transports_joins_the_original_sort_before_the_resort() {
+    // r1904069 (bus, Mexico) as of 2026-11: no platform ways, the chain has gaps
+    // and only joins in the order given by the greedy sort from the first way;
+    // the resort from a free endpoint must not replace it (it came out Broken)
+    let parser = Parser::new_ptv2("tests/r1904069.pbf", 1).unwrap();
+    let pts = parser.get_public_transports(500.0);
+    assert_eq!(pts.len(), 1);
+    assert_eq!(pts[0].id, 1904069);
+    assert_eq!(pts[0].parse_status, ParseStatus::JoinedSorted);
+    assert_eq!(pts[0].geometry.len(), 1);
+}
