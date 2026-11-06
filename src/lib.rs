@@ -1,5 +1,6 @@
 mod parser;
 pub use parser::parse_status::ParseStatus;
+pub use parser::relation::is_itinerary_role;
 pub use parser::relation::Area;
 pub use parser::relation::Node;
 pub use parser::relation::PublicTransport;

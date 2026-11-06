@@ -12,9 +12,10 @@ Blazing fast by design: every step in the process pipeline is fully parallelized
 
 1. Reads data from a .pbf file, extracting ways and relations filtered by attributes specified via the `--filter` argument.
 2. Processes each public transport relation as follows:
-   1. Sorts all the ways within the relation based on proximity.
-   2. Joins ways that share identical lat/lng coordinates at their first or last nodes, combining them into a single LineString.
-   3. If multiple LineStrings remain after this step:
+   1. Keeps only the way members that are part of the itinerary (no role, `forward`, `backward`, `hail_and_ride`); `platform*` and `stop*` way members are not travelled.
+   2. Sorts all the ways within the relation based on proximity.
+   3. Joins ways that share identical lat/lng coordinates at their first or last nodes, combining them into a single LineString.
+   4. If multiple LineStrings remain after this step:
       - It checks for gaps.
       - If the gaps are smaller than the specified gap threshold (in meters, default: 150), they are joined into one LineString.
 3. Outputs a JSON array, with one GeoJSON feature per way or relation found, including:

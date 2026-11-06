@@ -162,11 +162,11 @@ fn first_pass(ways: &Vec<Vec<Node>>) -> Vec<Vec<Node>> {
 /// - Nevertheless I think this is also done by ST_LineMerge()
 ///
 /// TODO: this can probably be made with some std function like vec.sort(|nodesa, nodesb| edgedistance(nodesa, nodesb))
-fn sort_ways(ways: &Vec<Vec<Node>>) -> Vec<Vec<Node>> {
+fn sort_ways(ways: &Vec<Vec<Node>>, start: usize) -> Vec<Vec<Node>> {
     // work on indices so we only compare endpoints (edgedistance) instead of
     // cloning whole ways on every comparison; clone each way once at the end
-    let mut remaining: Vec<usize> = (1..ways.len()).collect();
-    let mut sorted_indices = vec![0usize];
+    let mut remaining: Vec<usize> = (0..ways.len()).filter(|&i| i != start).collect();
+    let mut sorted_indices = vec![start];
     while !remaining.is_empty() {
         let last = &ways[*sorted_indices.last().unwrap()];
         let mut mindist = f64::INFINITY;
@@ -184,6 +184,20 @@ fn sort_ways(ways: &Vec<Vec<Node>>) -> Vec<Vec<Node>> {
         .into_iter()
         .map(|i| ways[i].clone())
         .collect()
+}
+
+/// index of the first way with a free endpoint: a first or last node shared with
+/// no endpoint of any other way, i.e. a candidate end of the chain
+fn way_with_free_endpoint(ways: &[Vec<Node>]) -> Option<usize> {
+    let is_free = |i: usize, node: &Node| {
+        ways.iter()
+            .enumerate()
+            .all(|(j, w)| j == i || (w[0] != *node && w[w.len() - 1] != *node))
+    };
+    (0..ways.len()).find(|&i| {
+        let w = &ways[i];
+        is_free(i, &w[0]) || is_free(i, &w[w.len() - 1])
+    })
 }
 
 /// calculate haversine distance between two nodes
@@ -244,10 +258,21 @@ fn flatten_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> (Vec<Vec<Node>>, Parse
     if passed.len() == 1 {
         return (passed, ParseStatus::Ok);
     }
-    let sorted = sort_ways(&passed);
+    let mut sorted = sort_ways(&passed, 0);
     let sorted_passed = first_pass(&sorted);
     if sorted_passed.len() == 1 {
         return (sorted_passed, ParseStatus::Sorted);
+    }
+    // the greedy nearest-neighbour walk from the first way never reaches the
+    // other side when that way is in the middle of the route: retry from a way
+    // that has a free endpoint, which is where a chain can start
+    if let Some(start) = way_with_free_endpoint(&passed).filter(|&i| i != 0) {
+        let resorted = sort_ways(&passed, start);
+        let resorted_passed = first_pass(&resorted);
+        if resorted_passed.len() == 1 {
+            return (resorted_passed, ParseStatus::Sorted);
+        }
+        sorted = resorted;
     }
     let joined = join_ways(&passed, tolerance);
     if joined.len() == 1 {
@@ -499,8 +524,18 @@ impl Way {
     }
 }
 
+/// whether a way with this relation member role is part of the route itinerary:
+/// PTv2 route ways carry no role, PTv1 used `forward`/`backward`, and
+/// `hail_and_ride` marks a stretch of the itinerary; `platform*`/`stop*` way members
+/// (platform areas or lines beside the road, stop ways) are not travelled
+pub fn is_itinerary_role(role: &str) -> bool {
+    matches!(role, "" | "forward" | "backward" | "hail_and_ride")
+}
+
 impl Relation {
-    /// best effort get a linestring or multilinestring from all the ways that compose this relation
+    /// best effort get a linestring or multilinestring from the itinerary ways of this relation
+    /// (see [`is_itinerary_role`]; `platform*` and `stop*` way members are kept in `ways`
+    /// but not travelled)
     /// if `tolerance` is > 0, then it also join gaps in the ways into one linestring when possible
     /// `tolerance` is in meters
     /// param `closed` to assert that the linestring last first element is within tolerance to the first element
@@ -511,6 +546,7 @@ impl Relation {
         let ways: Vec<Vec<Node>> = self
             .ways
             .iter()
+            .filter(|w| is_itinerary_role(&w.role))
             .map(|w| w.nodes.clone())
             .filter(|nodes| !nodes.is_empty())
             .collect();
@@ -709,7 +745,7 @@ mod tests {
         let way0 = vec![n(10, 0.0, 0.0), n(11, 0.0, 1.0)];
         let way1 = vec![n(20, 0.0, 1.5), n(21, 0.0, 2.0)];
         let way2 = vec![n(30, 0.0, 10.0), n(31, 0.0, 11.0)];
-        let sorted = sort_ways(&vec![way0, way2, way1]);
+        let sorted = sort_ways(&vec![way0, way2, way1], 0);
         assert_eq!(first_ids(&sorted), vec![10, 20, 30]);
     }
 
@@ -883,6 +919,160 @@ mod tests {
     fn way_flatten_ways_empty_is_broken_without_panic() {
         // closing an empty way used to panic on closed[0] in close_linestring
         let (out, status) = way(1, Vec::new()).flatten_ways(50.0, true);
+        assert_eq!(status, ParseStatus::Broken);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn relation_flatten_ways_ignores_a_disconnected_platform_way() {
+        // PTv2: a platform way beside the road is not part of the itinerary; it used
+        // to be chained in and break (or zig-zag) a perfectly connected route
+        let rel = relation_with_ways(vec![
+            way(1, vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001)]),
+            way_role(
+                9,
+                "platform",
+                vec![n(91, 0.0001, 0.0004), n(92, 0.0001, 0.0006)],
+            ),
+            way(2, vec![n(2, 0.0, 0.001), n(3, 0.0, 0.002)]),
+        ]);
+        let (out, status) = rel.flatten_ways(50.0, false);
+        assert_eq!(status, ParseStatus::Ok);
+        assert_eq!(out.len(), 1);
+        assert_eq!(ids(&out[0]), vec![1, 2, 3]);
+        // the platform way is still available on the relation
+        assert_eq!(rel.ways.len(), 3);
+        assert_eq!(rel.ways[1].role, "platform");
+    }
+
+    #[test]
+    fn relation_flatten_ways_ignores_platform_areas_and_stop_ways() {
+        // a closed platform area and a stop_entry_only way would otherwise be
+        // merged into the linestring with the 500 m tolerance
+        let rel = relation_with_ways(vec![
+            way_role(8, "platform_exit_only", square(81, 0.0001, 0.0, 0.0001)),
+            way(1, vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001)]),
+            way_role(9, "platform", square(91, 0.0001, 0.0005, 0.0001)),
+            way(2, vec![n(2, 0.0, 0.001), n(3, 0.0, 0.002)]),
+            way_role(
+                7,
+                "stop_entry_only",
+                vec![n(71, 0.0, 0.0021), n(72, 0.0, 0.0022)],
+            ),
+        ]);
+        let (out, status) = rel.flatten_ways(500.0, false);
+        assert_eq!(status, ParseStatus::Ok);
+        assert_eq!(out.len(), 1);
+        assert_eq!(ids(&out[0]), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn relation_flatten_ways_only_platforms_is_broken() {
+        let rel = relation_with_ways(vec![way_role(
+            9,
+            "platform",
+            vec![n(91, 0.0, 0.0), n(92, 0.0, 0.001)],
+        )]);
+        let (out, status) = rel.flatten_ways(50.0, false);
+        assert_eq!(status, ParseStatus::Broken);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn relation_flatten_ways_keeps_forward_backward_and_hail_and_ride_ways() {
+        let rel = relation_with_ways(vec![
+            way_role(1, "forward", vec![n(1, 0.0, 0.0), n(2, 0.0, 0.001)]),
+            way(2, vec![n(2, 0.0, 0.001), n(3, 0.0, 0.002)]),
+            way_role(3, "backward", vec![n(3, 0.0, 0.002), n(4, 0.0, 0.003)]),
+            way_role(4, "hail_and_ride", vec![n(4, 0.0, 0.003), n(5, 0.0, 0.004)]),
+        ]);
+        let (out, status) = rel.flatten_ways(50.0, false);
+        assert_eq!(status, ParseStatus::Ok);
+        assert_eq!(out.len(), 1);
+        assert_eq!(ids(&out[0]), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn is_itinerary_role_matches_route_way_roles_only() {
+        for role in ["", "forward", "backward", "hail_and_ride"] {
+            assert!(is_itinerary_role(role), "{:?}", role);
+        }
+        for role in [
+            "platform",
+            "platform_entry_only",
+            "platform_exit_only",
+            "stop",
+            "stop_entry_only",
+            "stop_exit_only",
+            "outer",
+            "inner",
+        ] {
+            assert!(!is_itinerary_role(role), "{:?}", role);
+        }
+    }
+
+    #[test]
+    fn polygons_do_not_apply_the_itinerary_role_filter() {
+        // the multipolygon path keeps treating outer/inner (and roleless) ways as rings
+        let sq = square(1, 0.0, 0.0, 1.0);
+        let r = relation_with_ways(vec![
+            way_role(
+                1,
+                "outer",
+                vec![sq[0].clone(), sq[1].clone(), sq[2].clone()],
+            ),
+            way(2, vec![sq[2].clone(), sq[3].clone(), sq[0].clone()]),
+            way_role(3, "inner", square(11, 0.4, 0.4, 0.2)),
+        ]);
+        let (polys, status) = r.polygons(50.0);
+        assert_eq!(status, ParseStatus::Ok);
+        assert_eq!(polys.len(), 1);
+        assert_eq!(polys[0].len(), 2);
+        assert_eq!(ring_ids(&polys[0][0]), vec![1, 2, 3, 4, 1]);
+    }
+
+    #[test]
+    fn way_with_free_endpoint_finds_a_chain_end() {
+        let ways = vec![
+            vec![n(2, 0.0, 1.0), n(3, 0.0, 2.0)],
+            vec![n(3, 0.0, 2.0), n(4, 0.0, 3.0)],
+            vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)],
+        ];
+        assert_eq!(way_with_free_endpoint(&ways), Some(1));
+        // a loop has no free endpoint
+        let ring = vec![
+            vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)],
+            vec![n(2, 0.0, 1.0), n(3, 1.0, 1.0)],
+            vec![n(3, 1.0, 1.0), n(1, 0.0, 0.0)],
+        ];
+        assert_eq!(way_with_free_endpoint(&ring), None);
+    }
+
+    #[test]
+    fn flatten_ways_sorts_a_chain_whose_first_way_is_in_the_middle() {
+        // ways: A-B-C-D-E given as [C, A, E, B, D]: the greedy walk from C goes
+        // C,B,A then cannot reach D,E (gaps > tolerance), so it must restart from
+        // a way with a free endpoint (A or E)
+        let a = vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)];
+        let b = vec![n(2, 0.0, 1.0), n(3, 0.0, 2.0)];
+        let c = vec![n(3, 0.0, 2.0), n(4, 0.0, 3.0)];
+        let d = vec![n(4, 0.0, 3.0), n(5, 0.0, 4.0)];
+        let e = vec![n(5, 0.0, 4.0), n(6, 0.0, 5.0)];
+        let (out, status) = flatten_ways(&vec![c, a, e, b, d], 50.0);
+        assert_eq!(status, ParseStatus::Sorted);
+        assert_eq!(out.len(), 1);
+        assert_eq!(ids(&out[0]), vec![1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn flatten_ways_still_broken_when_no_chain_exists() {
+        // a fork: A-B and C both end at node 2 but D is far away
+        let ways = vec![
+            vec![n(2, 0.0, 1.0), n(3, 0.0, 2.0)],
+            vec![n(1, 0.0, 0.0), n(2, 0.0, 1.0)],
+            vec![n(4, 0.0, 10.0), n(5, 0.0, 11.0)],
+        ];
+        let (out, status) = flatten_ways(&ways, 50.0);
         assert_eq!(status, ParseStatus::Broken);
         assert!(out.is_empty());
     }

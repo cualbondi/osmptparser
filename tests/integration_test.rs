@@ -107,7 +107,8 @@ fn relation_members_keep_their_roles() {
     let bus = parser.get_relation_from_id(400).unwrap();
     assert_eq!(bus.stops.len(), 1);
     assert_eq!(bus.stops[0].role, "stop");
-    assert_eq!(bus.ways[0].role, "");
+    assert_eq!(bus.ways[0].role, "platform");
+    assert_eq!(bus.ways[1].role, "");
 }
 
 #[test]
@@ -133,4 +134,40 @@ fn results_are_sorted_by_id_whatever_the_thread_count() {
     };
     assert_eq!(pt_ids(1), vec![85965, 2030162]);
     assert_eq!(pt_ids(1), pt_ids(4));
+}
+
+#[test]
+fn get_public_transports_skips_platform_way_members() {
+    let parser = Parser::new_ptv2("tests/areas.pbf", 1).unwrap();
+    let pts = parser.get_public_transports(500.0);
+    assert_eq!(pts.iter().map(|p| p.id).collect::<Vec<_>>(), vec![400, 500]);
+
+    // route 400: ways 1 + 2 form a closed ring around the province, way 8 is a
+    // platform area beside the road and must not be chained in
+    let bus = &pts[0];
+    assert_eq!(bus.tags["name"], "Bus");
+    assert_eq!(bus.parse_status, ParseStatus::Ok);
+    assert_eq!(bus.geometry.len(), 1);
+    assert_eq!(bus.geometry[0].len(), 5);
+    assert!(!has_point(&bus.geometry[0], (0.4, 0.0001)));
+    assert_eq!(bus.stops.len(), 1);
+    assert_eq!(bus.stops[0].role, "stop");
+    // the platform way is still on the relation with its role
+    let relation = parser.get_relation_from_id(400).unwrap();
+    assert_eq!(
+        relation
+            .ways
+            .iter()
+            .map(|w| (w.id, w.role.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(8, "platform"), (1, ""), (2, "")]
+    );
+
+    // route 500: the first member is in the middle of the chain
+    let out_of_order = &pts[1];
+    assert_eq!(out_of_order.parse_status, ParseStatus::Sorted);
+    assert_eq!(out_of_order.geometry.len(), 1);
+    assert_eq!(out_of_order.geometry[0].len(), 6);
+    assert!(has_point(&out_of_order.geometry[0], (0.0, 6.0)));
+    assert!(has_point(&out_of_order.geometry[0], (0.5, 6.0)));
 }
