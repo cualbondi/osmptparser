@@ -258,7 +258,7 @@ fn flatten_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> (Vec<Vec<Node>>, Parse
     if passed.len() == 1 {
         return (passed, ParseStatus::Ok);
     }
-    let mut sorted = sort_ways(&passed, 0);
+    let sorted = sort_ways(&passed, 0);
     let sorted_passed = first_pass(&sorted);
     if sorted_passed.len() == 1 {
         return (sorted_passed, ParseStatus::Sorted);
@@ -266,21 +266,30 @@ fn flatten_ways(ways: &Vec<Vec<Node>>, tolerance: f64) -> (Vec<Vec<Node>>, Parse
     // the greedy nearest-neighbour walk from the first way never reaches the
     // other side when that way is in the middle of the route: retry from a way
     // that has a free endpoint, which is where a chain can start
-    if let Some(start) = way_with_free_endpoint(&passed).filter(|&i| i != 0) {
-        let resorted = sort_ways(&passed, start);
-        let resorted_passed = first_pass(&resorted);
+    let resorted = way_with_free_endpoint(&passed)
+        .filter(|&i| i != 0)
+        .map(|start| sort_ways(&passed, start));
+    if let Some(resorted) = &resorted {
+        let resorted_passed = first_pass(resorted);
         if resorted_passed.len() == 1 {
             return (resorted_passed, ParseStatus::Sorted);
         }
-        sorted = resorted;
     }
     let joined = join_ways(&passed, tolerance);
     if joined.len() == 1 {
         return (joined, ParseStatus::Joined);
     }
+    // join the original sort first so a route that joined before keeps joining,
+    // then the resort as a last resort
     let joined_sorted = join_ways(&sorted, tolerance);
     if joined_sorted.len() == 1 {
         return (joined_sorted, ParseStatus::JoinedSorted);
+    }
+    if let Some(resorted) = &resorted {
+        let joined_resorted = join_ways(resorted, tolerance);
+        if joined_resorted.len() == 1 {
+            return (joined_resorted, ParseStatus::JoinedSorted);
+        }
     }
     (Vec::new(), ParseStatus::Broken)
 }
